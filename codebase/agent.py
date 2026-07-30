@@ -13,9 +13,9 @@ from tools import scan_text_and_urls
 
 class PhishingAgent:
     """
-    Bộ não trung tâm PhishShield AI v0.2.2 (Empathetic UX & Military-Grade Zero-Trust Armor).
-    - Tầng 1: Smart Rule Engine 2.0 (Zero-Trust SSRF & Scheme Firewall) -> Bảo vệ chủ động tuyệt đối (0 Token).
-    - Tầng 2: Agentic LLM Reasoning (OpenAI gpt-4o-mini + Sandboxed Tools) -> Cung cấp góc nhìn cố vấn minh bạch.
+    Bộ não trung tâm PhishShield AI v0.4.0 (Universal Actionable Copilot & Zero-Trust Armor).
+    - Tầng 1: Smart Rule Engine 2.0 (Zero-Trust SSRF & Scheme Firewall + Auto-Drafts) -> 0 Token.
+    - Tầng 2: Agentic LLM Reasoning (OpenAI gpt-4o-mini + Sandboxed Tools + AI Action Drafts).
     """
     def __init__(self, model_name: str = "gpt-4o-mini"):
         config = get_config()
@@ -33,11 +33,11 @@ class PhishingAgent:
                 return f.read()
         except Exception as e:
             print(f"[Warning] Không thể tải system_prompt.md: {e}. Sử dụng prompt mặc định.")
-            return "You are an Empathetic Cybersecurity AI Copilot. Respond in JSON format with keys: risk_level, risk_score, confidence_level, confidence_score, suspicious_elements, recommendation."
+            return "You are an Empathetic Cybersecurity AI Copilot. Respond in JSON format with keys: risk_level, risk_score, confidence_level, confidence_score, suspicious_elements, recommendation, action_draft."
 
     def analyze_email(self, text_input: str) -> Dict[str, Any]:
         """
-        Hàm thực thi phân tích chính, trả về chuẩn JSON dictionary kèm Mức Độ Tự Tin & Ngôn ngữ Cố Vấn.
+        Hàm thực thi phân tích chính, trả về chuẩn JSON dictionary kèm Mức Độ Tự Tin & Bản nháp Hành động.
         """
         print(f"\n[Agent] 🔍 Đang lắng nghe và rà soát văn bản ({len(text_input)} ký tự)...")
         
@@ -53,14 +53,17 @@ class PhishingAgent:
             res["extracted_urls"] = extracted_urls
             return res
             
-        # Bước 3: Gửi Hồ sơ Kỹ thuật tới OpenAI gpt-4o-mini (LLM Reasoning & Tool Integration)
+        # Bước 3: Gửi Hồ sơ Kỹ thuật tới OpenAI gpt-4o-mini (LLM Reasoning & Universal Auto-Drafting)
         print(f"[Agent] 🤖 Ca kiểm chứng cần chiều sâu -> Đang kích hoạt Trợ lý OpenAI ({self.provider.model_name})...")
         
         url_context_json = json.dumps(scan_result.get("url_analyses", []), ensure_ascii=False)
+        soc_eng_json = json.dumps(scan_result.get("social_engineering_audit", {}), ensure_ascii=False)
         user_prompt = (
             f"NỘI DUNG VĂN BẢN / EMAIL CẦN PHÂN TÍCH:\n\"\"\"{text_input}\"\"\"\n\n"
-            f"HỒ SƠ KỸ THUẬT SƠ BỘ (TECHNICAL AUDIT PACKET) TỪ CÔNG CỤ CÁCH LY BẮT TRẮNG CỦA HỆ THỐNG:\n{url_context_json}\n\n"
-            "Hãy phát huy trí tuệ của Trợ lý Cố Vấn Bảo Mật Đồng Cảm, đánh giá rủi ro toàn cục và trả về chuẩn JSON object theo quy tắc trong System Prompt."
+            f"HỒ SƠ KỸ THUẬT SƠ BỘ (TECHNICAL AUDIT PACKET) TỪ CÔNG CỤ CÁCH LY BẮT TRẮNG CỦA HỆ THỐNG:\n"
+            f"- Chi tiết kiểm duyệt URL: {url_context_json}\n"
+            f"- Chi tiết rà soát Ngữ pháp Thao túng tâm lý: {soc_eng_json}\n\n"
+            "Hãy phát huy trí tuệ của Trợ lý Cố Vấn Bảo Mật Đồng Cảm, đánh giá rủi ro toàn cục và BẮT BUỘC soạn tạo bản nháp trả về chuẩn JSON object theo quy tắc trong System Prompt."
         )
         
         llm_response = self.provider.generate_json(
@@ -78,11 +81,11 @@ class PhishingAgent:
         return llm_response
 
 # -----------------------------------------------------------------------------
-# KIỂM THỬ THỰC CHIẾN 5 CA - HỘI TỤ ĐỦ QUA RULE, TƯỜNG LỬA ZERO-TRUST & LLM REASONING
+# KIỂM THỬ THỰC CHIẾN 5 CA - HỘI TỤ ĐỦ QUA RULE, TƯỜNG LỬA ZERO-TRUST & BẢN NHÁP COPILOT
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
     print("="*85)
-    print("🛡️ KIỂM THỬ BỘ NÃO PHISHSHIELD AI AGENT V0.2.2 (ZERO-TRUST ARMOR & EMPATHETIC UX)")
+    print("🛡️ KIỂM THỬ BỘ NÃO PHISHSHIELD AI AGENT V0.4.0 (ACTIONABLE COPILOT DRAFTS & ZERO-TRUST)")
     print("="*85)
     
     try:
@@ -93,23 +96,23 @@ if __name__ == "__main__":
         
     test_cases = [
         {
-            "name": "Ca 1: Link VLearn chính thức sạch (Mức Xanh - Rule 2.0 êm dịu, 0 Token)",
+            "name": "Ca 1: Link VLearn chính thức sạch (Mức Xanh -> Nháp REPLY_ACK cảm ơn xác nhận)",
             "content": "Chào lớp, tài liệu bài học ngày hôm nay đã được cập nhật trên portal VLearn chính thức: https://vlearn.vn/lesson-04"
         },
         {
-            "name": "Ca 2: Nhái tên miền Levenshtein (Mức Đỏ - Rule 2.0 Cố vấn minh bạch, 0 Token)",
+            "name": "Ca 2: Nhái tên miền Levenshtein (Mức Đỏ -> Nháp INCIDENT_REPORT gửi đội IT)",
             "content": "[Cảnh báo lương] Danh sách chi trả kỳ nghỉ lễ có tại liên kết nội bộ: https://v1earn.vn/payroll"
         },
         {
-            "name": "Ca 3: Tên miền mới xa lạ + Thao túng tâm lý thúc ép gấp gáp (THỰC SỰ GỌI LLM REASONING)",
+            "name": "Ca 3: Tên miền mới xa lạ + Thao túng tâm lý thúc ép (LLM tự viết nháp VERIFICATION gửi HR)",
             "content": "[Phòng Nhân Sự Tập Đoàn] Kính gửi toàn thể Anh/Chị, do yêu cầu quyết toán thuế THU NHẬP CÁ NHÂN KỲ 2026 gấp, mọi người khẩn trương bấm đăng nhập vào portal quản lý tài khoản nhân sự mới tại https://hr-payroll-portal2026.cloud/verify-account trước 17:00 hôm nay. Ai không hoàn tất sẽ bị tạm tháo danh sách trả lương kỳ này."
         },
         {
-            "name": "Ca 4: Link Rút gọn Bitly & Chuyển hướng ẩn (THỰC SỰ DÙNG TOOL CÁCH LY + LLM REASONING)",
+            "name": "Ca 4: Link Rút gọn Bitly & Chuyển hướng ẩn (Tool cách ly + LLM suy luận Báo Cáo)",
             "content": "Chào các bạn đồng nghiệp, phòng Tài chính vừa gởi biểu mẫu quy chuẩn thưởng Tết sớm. Các bạn xem thông tin tại liên kết rút gọn này nhé: https://bit.ly/3xYz9 hoặc https://google.com/url?q=https://unknown-external-server.work/reward-list.docx"
         },
         {
-            "name": "Ca 5: Kiểm nghiệm Tường lửa Zero-Trust (Chặn tấn công SSRF & Giao thức cấm trái phép)",
+            "name": "Ca 5: Kiểm nghiệm Tường lửa Zero-Trust (Chặn SSRF & Giao thức cấm + Nháp Báo Cáo SOC)",
             "content": "Kính gửi Admin Kỹ Thuật, máy chủ báo rò rỉ log. Xin vui lòng kiểm tra tải mạng tại chuỗi liên kết nội bộ http://127.0.0.1:8080/admin-delete-all và truy xuất nhật ký bảo mật qua đường dẫn file:///etc/passwd để khắc phục gấp."
         }
     ]
@@ -121,7 +124,7 @@ if __name__ == "__main__":
         print("#"*85)
         
         result = agent.analyze_email(tc["content"])
-        print("\n📊 KẾT QUẢ PHÂN TÍCH CỐ VẤN (EMPATHETIC COPILOT OUTPUT):")
+        print("\n📊 KẾT QUẢ PHÂN TÍCH CỐ VẤN & BẢN NHÁP (ACTIONABLE COPILOT OUTPUT):")
         print(json.dumps(result, indent=2, ensure_ascii=False))
         
-    print("\n\n🎉 HOÀN TẤT CHẠY KIỂM THỬ BỘ NÃO PHISHSHIELD V0.2.2 THÀNH CÔNG!")
+    print("\n\n🎉 HOÀN TẤT CHẠY KIỂM THỬ BỘ NÃO PHISHSHIELD V0.4.0 THÀNH CÔNG!")

@@ -103,6 +103,12 @@ def _to_contract(raw: dict, tier: str) -> dict:
         "recommendation": raw.get("recommendation", ""),
         "analysis_source": raw.get("analysis_source", ""),
         "extracted_urls": raw.get("extracted_urls", []),
+        "action_draft": raw.get("action_draft", {
+            "draft_type": "REPLY_ACK" if verdict == "SAFE" else ("INCIDENT_REPORT" if verdict == "DANGER" else "VERIFICATION"),
+            "target_recipient": "Phòng Ban Hỗ Trợ / Đối Tác",
+            "message_title": "💡 Gợi ý thao tác phản hồi nhanh cho email này",
+            "message_template": "Cảm ơn bạn, mình đã tiếp nhận và sẽ kiểm tra phản hồi sớm nhé!"
+        }),
     }
 
 
@@ -137,6 +143,12 @@ def scan_only(text: str) -> dict:
         "recommendation": "Đang kiểm tra kỹ hơn. Khoan bấm liên kết nào cho tới khi có kết luận.",
         "analysis_source": "RULE_ENGINE (chờ tầng AI)",
         "extracted_urls": scan.get("extracted_urls", []),
+        "action_draft": {
+            "draft_type": "VERIFICATION",
+            "target_recipient": "Bộ phận Hỗ Trợ Kỹ Thuật",
+            "message_title": "💡 Gợi ý thao tác: Copy tin nhắn hỏi kiểm chứng liên kết chưa xác thực",
+            "message_template": "Chào các bạn, mình vừa nhận được email có mang liên kết bên ngoài chưa nằm trong danh sách kiểm nghiệm chính thức. Cho mình hỏi bên mình có đang triển khai công việc qua trang web này không ạ?"
+        },
         "pending_llm": _HAS_KEY,
     }
 
@@ -165,6 +177,12 @@ def analyze(text: str) -> dict:
                               "(thiếu OPENAI_API_KEY). Đừng bấm liên kết cho tới khi kiểm chứng được.",
             "analysis_source": "RULE_ENGINE (LLM unavailable — no API key)",
             "extracted_urls": scan.get("extracted_urls", []),
+            "action_draft": {
+                "draft_type": "VERIFICATION",
+                "target_recipient": "Phòng IT Helpdesk",
+                "message_title": "💡 Gợi ý thao tác: Copy tin nhắn hỏi xác minh với IT",
+                "message_template": "Chào đội IT, mình thấy trong thư có đường link lạ bên ngoài nhưng phần mềm chưa kết nối được máy chủ suy luận AI. Nhờ anh em kỹ thuật kiểm tra giúp tính an toàn của email này nhé!"
+            },
         }
 
     return _to_contract(_get_agent().analyze_email(text), tier="cloud")
@@ -219,7 +237,7 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8777
-    print(f"[bridge] engine=v1  llm_enabled={_HAS_KEY}  http://127.0.0.1:{port}")
+    print(f"[bridge] engine={ENGINE}  llm_enabled={_HAS_KEY}  http://127.0.0.1:{port}")
     if not _HAS_KEY:
         print("[bridge] Chưa có OPENAI_API_KEY — chỉ chạy tầng luật tĩnh (tier 1).")
     HTTPServer(("127.0.0.1", port), Handler).serve_forever()
