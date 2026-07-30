@@ -1,8 +1,8 @@
 """
-Cầu nối HTTP giữa tiện ích Chrome và engine v1.
+Cầu nối HTTP giữa tiện ích Chrome và engine phát hiện (hiện tại: v2).
 
-VÌ SAO CÓ FILE NÀY: tiện ích chạy bằng JavaScript, engine v1 viết bằng Python.
-Cách rẻ nhất để tiện ích dùng ĐÚNG code của v1 (thay vì chép lại logic sang JS
+VÌ SAO CÓ FILE NÀY: tiện ích chạy bằng JavaScript, engine viết bằng Python.
+Cách rẻ nhất để tiện ích dùng ĐÚNG code của engine (thay vì chép lại logic sang JS
 rồi để hai bản trôi lệch nhau) là bọc nó sau một endpoint HTTP chạy tại localhost.
 
 File này KHÔNG chứa logic phát hiện. Nó chỉ gọi lại:
@@ -38,6 +38,10 @@ except Exception:
 
 _agent = None
 
+# Nhãn phiên bản engine mà bridge đang bọc. Đây là hằng số thủ công — nếu
+# codebase/tools/ được nâng cấp thì SỬA Ở ĐÂY, đừng để /health báo sai phiên bản.
+ENGINE = "v2"
+
 
 def _get_agent():
     """Khởi tạo PhishingAgent một lần, chỉ khi thật sự cần gọi LLM."""
@@ -57,7 +61,7 @@ _VERDICT = {"SAFE": "SAFE", "WARNING": "DOUBT", "DANGER": "DANGER"}
 
 
 def _to_contract(raw: dict, tier: str) -> dict:
-    """Dịch đầu ra của engine v1 sang hợp đồng giao diện tiện ích."""
+    """Dịch đầu ra của engine sang hợp đồng giao diện tiện ích."""
     level = str(raw.get("risk_level", "")).upper()
     # Nhãn lạ -> NGHI VẤN, không phải AN TOÀN.
     verdict = _VERDICT.get(level, "DOUBT")
@@ -90,7 +94,7 @@ def _to_contract(raw: dict, tier: str) -> dict:
         confidence = "TRUNG BÌNH"
 
     return {
-        "engine": "v1",
+        "engine": ENGINE,
         "tier": tier,
         "verdict": verdict,
         "risk_score": score,
@@ -123,7 +127,7 @@ def scan_only(text: str) -> dict:
     # Tuyệt đối không trả AN TOÀN ở đây.
     reasons = [r for a in scan.get("url_analyses", []) for r in a.get("reasons", [])]
     return {
-        "engine": "v1",
+        "engine": ENGINE,
         "tier": "local",
         "verdict": "DOUBT",
         "risk_score": None,
@@ -138,7 +142,7 @@ def scan_only(text: str) -> dict:
 
 
 def analyze(text: str) -> dict:
-    """Chạy đúng luồng hai tầng của v1."""
+    """Chạy đúng luồng hai tầng của engine."""
     scan = scan_text_and_urls(text)
 
     if not scan.get("needs_llm_call", True):
@@ -149,7 +153,7 @@ def analyze(text: str) -> dict:
         # Cần LLM nhưng không có key: NGHI VẤN + độ tin cậy THẤP.
         # Tuyệt đối không hạ xuống "an toàn".
         return {
-            "engine": "v1",
+            "engine": ENGINE,
             "tier": "local",
             "verdict": "DOUBT",
             "risk_score": None,
@@ -182,7 +186,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/health":
             self.send_error(404)
             return
-        self._json(200, {"ok": True, "engine": "v1", "llm_enabled": _HAS_KEY})
+        self._json(200, {"ok": True, "engine": ENGINE, "llm_enabled": _HAS_KEY})
 
     def do_POST(self):
         if self.path not in ("/analyze", "/scan"):
