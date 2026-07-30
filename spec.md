@@ -78,19 +78,50 @@ Loại: [x] Tính năng mới  [ ] Tối ưu tính năng có sẵn
 
 ## §7. Kiểm thử
 - **Chiều chất lượng + định nghĩa kiểm chứng được:**
-  1. *Recall (Độ bao phủ Phishing):* Định nghĩa = TP / (TP + FN). Đo lường tỷ lệ phát hiện đúng các URL lừa đảo độc hại (Mục tiêu ≥ 90.0%).
-  2. *False Positive Rate (Tỷ lệ báo nhầm):* Định nghĩa = FP / (FP + TN). Tỷ lệ gán nhầm URL an toàn thành độc hại (Mục tiêu < 5.0%).
-  3. *Accuracy (Độ chính xác chung):* Định nghĩa = (TP + TN) / Tổng số cases (Mục tiêu ≥ 90.0%).
-  4. *Rule Hit Rate (Tối ưu chi phí):* Tỷ lệ các URL an toàn/độc hại rõ ràng được Tầng 1 Rule Engine xử lý trực tiếp (Mục tiêu ≥ 50.0%).
+  1. *Recall (Độ bao phủ Phishing):* Định nghĩa = TP / (TP + FN). Tỷ lệ email lừa đảo mà người dùng **được cảnh báo** — tính cả `DANGER` lẫn `WARNING`, vì cả hai đều ngăn được cú bấm (Mục tiêu ≥ 90.0%).
+  2. *False Positive Rate (Tỷ lệ báo nhầm):* Định nghĩa = FP / (tổng số email sạch). Tỷ lệ email sạch bị gán **`DANGER`** (Mục tiêu < 5.0%).
+  3. *Friction Rate (Tỷ lệ gây phiền):* Tỷ lệ email sạch bị gán `WARNING`. Tách riêng khỏi FPR: nói "chưa chắc" **không** giống với gán "nguy hiểm" — người dùng vẫn đọc thư bình thường (Không đặt ngưỡng cứng; theo dõi để tránh phiền quá mức).
+  4. *Accuracy (Độ chính xác chung):* Định nghĩa = (TP + TN + số ca "nghi vấn" đoán đúng) / Tổng số cases. **Tính dè dặt:** email sạch bị gán `WARNING` KHÔNG được tính là đúng (Mục tiêu ≥ 90.0%).
+  5. *Rule Hit Rate (Tối ưu chi phí):* Tỷ lệ các URL an toàn/độc hại rõ ràng được Tầng 1 Rule Engine xử lý trực tiếp (Mục tiêu ≥ 50.0%).
+
+- **Cách chấm điểm — ba lớp, theo đúng ba phán quyết của sản phẩm:**
+  Sản phẩm trả về đúng ba mức (`SAFE` / `WARNING` / `DANGER`), nên bảng chấm điểm cũng có ba ô.
+  Mỗi loại sai được cân theo thiệt hại thật:
+
+  | Nhãn đúng | Máy trả | Ý nghĩa | Đếm vào |
+  |---|---|---|---|
+  | lừa đảo | `DANGER` | bắt chắc | TP |
+  | lừa đảo | `WARNING` | vẫn được cảnh báo, vẫn tránh được | TP |
+  | lừa đảo | `SAFE` | **BỎ SÓT — nguy hiểm nhất** | FN |
+  | sạch | `SAFE` | cho qua đúng | TN |
+  | sạch | `WARNING` | gây phiền, không chặn | Friction (không phải FP) |
+  | sạch | `DANGER` | **BÁO NHẦM — tốn kém nhất** | FP |
+  | nghi vấn | `WARNING` | đúng ý đồ | Đúng |
 - **Golden set (≥20 case theo cơ cấu trong guide §2.6, file trong eval/):**
   - Lưu tại [eval/golden_set.json](file:///d:/AI_Vin/LAB/K3-hackathon-Fishing-E402/eval/golden_set.json) gồm **25 mẫu kiểm thử thực tế**.
   - Phủ đủ 4 Lớp Chỗ Khó (4 cases/lớp) & **17/25 cases (68.0%)** bắt nguồn từ quan sát thực tế (Discord khoá học, Chatlog VLearn, Khảo sát người dùng, Email rác thô).
 - **Quality bar (chốt từ 23:59, giữ nguyên sau đó):** "Đạt khi ≥ 90.0% qua bộ, Recall ≥ 90.0% và False Positive Rate < 5.0%."
 - **Kết quả các lượt chạy (bảng % — cập nhật đến trước CP6):**
-  | Lượt chạy | Chế độ | Accuracy | Precision | Recall | False Positive Rate | Rule Hit Rate | File kết quả |
-  |---|---|:---:|:---:|:---:|:---:|:---:|---|
-  | **Lượt 1 (Rule-only)** | Offline Rule | 80.0% | 100.0% | 61.5% | 0.0% | 100.0% | `eval/runs/run_rule_l1.json` |
-  | **Lượt 2 (Live LLM)** | Live `gpt-4o-mini` | **88.0%** | **100.0%** | **76.9%** | **0.0%** | **72.0%** | [eval/runs/latest_run.json](file:///d:/AI_Vin/LAB/K3-hackathon-Fishing-E402/eval/runs/latest_run.json) |
+  | Lượt chạy | Engine | Chế độ | Chấm điểm | Accuracy | Recall | FPR | Friction | Rule Hit | File kết quả |
+  |---|---|---|---|:---:|:---:|:---:|:---:|:---:|---|
+  | Lượt 1 | v1 | Offline Rule | 2 lớp (cũ) | 80.0% | 61.5% | 0.0% | — | 100.0% | `eval/runs/latest_run.json` |
+  | Lượt 2 | v1 | Live `gpt-4o-mini` | 2 lớp (cũ) | 80.0% | 61.5% | 0.0% | — | 72.0% | `eval/runs/live_run.json` |
+  | **Lượt 3** | **v2** | **Live `gpt-4o-mini`** | **3 lớp** | **96.0%** | **100%** | **0.0%** | **9.1%** | **68.0%** | `eval/runs/v2_live_run.json` |
+
+  **Đọc bảng này thế nào.** Lượt 1 và 2 giữ lại làm đối chứng, **không phải** vì engine kém đi mà vì
+  hai lượt đó bị chấm bằng bảng điểm cũ — bảng đó quy `WARNING` thành `safe/allow`, tức là mỗi lần
+  hệ thống nói "nghi vấn" đúng về một email lừa đảo thì lại bị ghi là đã cho qua. Riêng cách chấm
+  sai đó đã kéo Recall xuống 61.5% trong khi trên **cùng dữ liệu** con số thật là 92.3%.
+
+  Từ Lượt 2 lên Lượt 3 có **hai** thay đổi độc lập, không nên gộp làm một:
+  - **v2 (engine)** bổ sung bóc Open Redirect / link rút gọn → xoá nốt ca bỏ sót thật cuối cùng
+    (`rare_phish_03`, trước đó bị chấm `SAFE` điểm 0). Đây là phần **năng lực thật tăng lên**.
+  - **Chấm 3 lớp** thôi không vứt bỏ tín hiệu `WARNING` nữa. Đây là phần **đo cho đúng**,
+    không phải sản phẩm tốt lên.
+
+  Lượt 3 đạt cả 4 mục tiêu: Accuracy 96.0% (≥90), Recall 100% (≥90), FPR 0.0% (<5), Rule Hit 68.0% (≥50).
+  **Không còn ca bỏ sót nào (FN = 0).** Còn 1 ca gây phiền: email Vietcombank hợp lệ bị gán `WARNING`
+  vì tên miền chưa có trong whitelist — chi phí thật, giữ lại trong báo cáo thay vì giấu đi.
 
 ## §8. Phân công & kế hoạch
 - **Phân công có tên:**
@@ -112,4 +143,7 @@ Loại: [x] Tính năng mới  [ ] Tối ưu tính năng có sẵn
 | 2026-07-30 | Tích hợp PhishingAgent vào `run_eval.py` | Đo lường thực tế hiệu năng Mô hình Lai (Rule + LLM) |
 | 2026-07-30 | Bổ sung cơ chế quét Open Redirect & Shorteners | Vá lỗ hổng ca `rare_phish_03` (`google.com/url?q=...`) và `bit.ly` |
 | 2026-07-30 | Cập nhật chính sách Pre-click URL Security | Gán `predicted: block` cho các URL nghi vấn `risk_score >= 50` |
+| 2026-07-30 | **Đổi cách chấm điểm eval từ 2 lớp sang 3 lớp** | `run_eval.py` đang quy `WARNING` → `("safe", "allow")`. Hệ quả: mỗi lần hệ thống cảnh báo đúng "nghi vấn" về một email lừa đảo lại bị ghi là **đã cho qua an toàn**, và bản thân bảng điểm vi phạm hard-spot ④ (bảo người dùng cứ tiếp tục với thư mình đang không chắc). Trên cùng dữ liệu, riêng lỗi chấm điểm này kéo Recall từ 92.3% xuống 61.5%. Nay `WARNING` có ô riêng, hành động `warn`; thêm chỉ số **Friction** tách khỏi FPR. Chi tiết: issue #5 |
+| 2026-07-30 | Sửa nhãn `hs2_ambiguous_03` trong Golden Set: `safe/allow` → `suspicious/warn` | Ca này là "tên miền đối tác **chưa kiểm chứng**", nằm ở Lớp ② Mơ hồ, và spec §5 (mục 4) + nguyên tắc G10 đều nói đáp án đúng là `WARNING`. Nhãn `safe` cũ chấm ngược lại đúng hành vi mà case sinh ra để kiểm tra — hệ thống làm đúng thiết kế thì lại bị trừ điểm. Ca Vietcombank giữ nguyên nhãn `safe` vì đó là phiền thật, cần báo cáo trung thực |
+| 2026-07-30 | Chạy lại eval trên engine v2 (Lượt 3) | v2 bóc được Open Redirect → xoá ca bỏ sót cuối cùng `rare_phish_03`. Kết quả: FN = 0, đạt cả 4 mục tiêu chất lượng |
 

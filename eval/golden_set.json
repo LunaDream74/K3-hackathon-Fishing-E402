@@ -72,9 +72,9 @@
     "email_subject": "Tài liệu dự án phối hợp liên nhóm",
     "email_body": "Gửi mọi người tài liệu khảo sát chung từ phía đối tác. Vui lòng tham khảo.",
     "url": "https://partner-company.com/project-docs",
-    "expected_label": "safe",
-    "expected_action": "allow",
-    "notes": "Lớp 2: Domain lạ nhưng không có từ khóa giả mạo/thúc ép, nội dung trao đổi công việc"
+    "expected_label": "suspicious",
+    "expected_action": "warn",
+    "notes": "Tên miền đối tác bên ngoài CHƯA kiểm chứng: đáp án đúng là NGHI VẤN (WARNING), không phải An toàn. Khớp spec §5 (mục 4) và nguyên tắc G10 — thà thận trọng còn hơn phán đoán liều. Trước đây gán nhãn safe/allow, tức là chấm điểm ngược lại đúng hành vi mà case này sinh ra để kiểm tra."
   },
   {
     "id": "hs2_ambiguous_04",

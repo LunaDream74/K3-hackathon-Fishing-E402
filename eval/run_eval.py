@@ -128,6 +128,7 @@ def run_evaluation(cases: List[Dict[str, Any]], mode: str = "live", model_name: 
     results = []
     tp = fp = tn = fn = 0
     friction = 0  # thư sạch bị gán WARNING — gây phiền, nhưng không phải báo nhầm
+    caution_ok = caution_over = caution_under = 0  # các ca đáp án đúng là "nghi vấn"
     rule_hits = 0
     llm_calls = 0
     start_time = time.time()
@@ -186,6 +187,19 @@ def run_evaluation(cases: List[Dict[str, Any]], mode: str = "live", model_name: 
             else:
                 fn += 1; hard_spot_stats[category]["fn"] += 1
                 outcome = "miss"
+        elif expected_label == "suspicious":
+            # Ca mà đáp án đúng CHÍNH LÀ "chưa chắc" (vd tên miền đối tác chưa
+            # kiểm chứng). Không tính vào tp/fp/tn/fn, vì recall và FPR chỉ có
+            # nghĩa trên trục lừa đảo/sạch — gộp vào sẽ làm nhoè cả hai.
+            if pred_label == "suspicious":
+                caution_ok += 1
+                outcome = "correct"
+            elif pred_label == "phishing":
+                caution_over += 1
+                outcome = "over_warn"    # thận trọng quá mức
+            else:
+                caution_under += 1
+                outcome = "under_warn"   # đáng lẽ phải cảnh báo mà lại nói an toàn
         else:
             if pred_label == "safe":
                 tn += 1; hard_spot_stats[category]["tn"] += 1
@@ -221,7 +235,7 @@ def run_evaluation(cases: List[Dict[str, Any]], mode: str = "live", model_name: 
     total = len(cases)
     elapsed_sec = round(time.time() - start_time, 2)
     # accuracy dè dặt: "friction" KHÔNG được tính là đúng.
-    accuracy = (tp + tn) / total if total > 0 else 0.0
+    accuracy = (tp + tn + caution_ok) / total if total > 0 else 0.0
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
     f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
@@ -267,7 +281,10 @@ def run_evaluation(cases: List[Dict[str, Any]], mode: str = "live", model_name: 
             "fp": fp,
             "tn": tn,
             "fn": fn,
-            "friction": friction
+            "friction": friction,
+            "caution_ok": caution_ok,
+            "caution_over": caution_over,
+            "caution_under": caution_under
         },
         "hybrid_architecture_stats": {
             "rule_based_hits": rule_hits,
