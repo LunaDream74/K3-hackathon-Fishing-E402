@@ -71,14 +71,23 @@ def _to_contract(raw: dict, tier: str) -> dict:
             "text": raw.get("recommendation") or "Không có dấu hiệu nào được ghi nhận.",
         }]
 
-    # Guardrail an toàn-bi-quan: thiếu tầng LLM thì không được khẳng định "an toàn"
-    # với độ tin cậy cao. Xem hard-spot 4.
-    if verdict == "SAFE" and tier == "local" and not _HAS_KEY:
-        confidence = "TRUNG BÌNH"
+    # v2 tự chấm độ tin cậy (confidence_level / confidence_score) — dùng của engine
+    # thay vì tự suy đoán, vì engine biết nó dựa trên bằng chứng nào.
+    # v1 không có trường này, nên vẫn giữ đường suy đoán cũ làm dự phòng.
+    _LEVEL = {"HIGH": "CAO", "MEDIUM": "TRUNG BÌNH", "LOW": "THẤP"}
+    engine_conf = _LEVEL.get(str(raw.get("confidence_level", "")).upper())
+
+    if engine_conf:
+        confidence = engine_conf
     elif verdict == "SAFE":
         confidence = "CAO"
     else:
         confidence = "CAO" if tier == "cloud" else "TRUNG BÌNH"
+
+    # Guardrail an toàn-bi-quan: chưa có tầng LLM thì không được khẳng định
+    # "an toàn" với độ tin cậy CAO, kể cả khi engine tự tin. Xem hard-spot ④.
+    if verdict == "SAFE" and tier == "local" and not _HAS_KEY and confidence == "CAO":
+        confidence = "TRUNG BÌNH"
 
     return {
         "engine": "v1",

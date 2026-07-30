@@ -90,12 +90,26 @@ def rule_fallback_predict(case: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def map_risk_to_prediction(risk_level: str) -> tuple[str, str]:
-    """Ánh xạ risk_level ("SAFE", "WARNING", "DANGER") thành (prediction, action)."""
+    """
+    Ánh xạ risk_level ("SAFE", "WARNING", "DANGER") thành (prediction, action).
+
+    Sản phẩm có ĐÚNG BA phán quyết — An toàn / Nghi vấn / Nguy hiểm — nên bảng chấm
+    điểm cũng phải có ba ô. Trước đây WARNING bị quy về ("safe", "allow"): hệ thống
+    nói "nghi vấn" mà bảng điểm ghi là "đã cho qua an toàn".
+
+    Hai hệ quả:
+      1. Recall bị báo thấp hơn thực tế (61.5% thay vì 92.3% trên cùng dữ liệu).
+      2. "allow" cho một email hệ thống đang không chắc chính là vi phạm hard-spot ④
+         ngay trong cách chấm điểm.
+
+    WARNING giờ là ô riêng, hành động "warn" — người dùng được cảnh báo, không bị
+    chặn, và cũng không bị bảo là an toàn.
+    """
     risk = str(risk_level).upper()
     if risk == "DANGER":
         return "phishing", "block"
     elif risk == "WARNING":
-        return "safe", "allow"
+        return "suspicious", "warn"
     else:
         return "safe", "allow"
 
@@ -113,6 +127,7 @@ def run_evaluation(cases: List[Dict[str, Any]], mode: str = "live", model_name: 
 
     results = []
     tp = fp = tn = fn = 0
+    friction = 0  # thư sạch bị gán WARNING — gây phiền, nhưng không phải báo nhầm
     rule_hits = 0
     llm_calls = 0
     start_time = time.time()
@@ -148,22 +163,41 @@ def run_evaluation(cases: List[Dict[str, Any]], mode: str = "live", model_name: 
             llm_calls += 1
 
         pred_label, pred_action = map_risk_to_prediction(risk_level)
-        outcome = "correct" if pred_label == expected_label else "incorrect"
 
-        if pred_label == "phishing" and expected_label == "phishing":
-            tp += 1
-            hard_spot_stats[category]["tp"] += 1
-        elif pred_label == "phishing" and expected_label == "safe":
-            fp += 1
-            hard_spot_stats[category]["fp"] += 1
-        elif pred_label == "safe" and expected_label == "safe":
-            tn += 1
-            hard_spot_stats[category]["tn"] += 1
+        # Chấm điểm ba lớp, theo đúng mức thiệt hại thật của từng loại sai:
+        #
+        #   lừa đảo -> DANGER   bắt chắc          (tp)
+        #   lừa đảo -> WARNING  vẫn được cảnh báo (tp — người dùng được bảo vệ)
+        #   lừa đảo -> SAFE     BỎ SÓT            (fn — nguy hiểm nhất)
+        #   sạch    -> SAFE     cho qua đúng      (tn)
+        #   sạch    -> WARNING  gây phiền         (friction — chưa chắc, không chặn)
+        #   sạch    -> DANGER   BÁO NHẦM          (fp — tốn kém nhất phía người dùng)
+        #
+        # "friction" cố tình KHÔNG gộp vào fp: nói "nghi vấn" về một thư sạch không
+        # giống với việc gán nó là nguy hiểm. Nhưng cũng không tính là đúng —
+        # nó vẫn là chi phí. Cách tính này giữ accuracy ở mức dè dặt.
+        if expected_label == "phishing":
+            if pred_label == "phishing":
+                tp += 1; hard_spot_stats[category]["tp"] += 1
+                outcome = "correct"
+            elif pred_label == "suspicious":
+                tp += 1; hard_spot_stats[category]["tp"] += 1
+                outcome = "correct_warned"
+            else:
+                fn += 1; hard_spot_stats[category]["fn"] += 1
+                outcome = "miss"
         else:
-            fn += 1
-            hard_spot_stats[category]["fn"] += 1
+            if pred_label == "safe":
+                tn += 1; hard_spot_stats[category]["tn"] += 1
+                outcome = "correct"
+            elif pred_label == "suspicious":
+                friction += 1
+                outcome = "friction"
+            else:
+                fp += 1; hard_spot_stats[category]["fp"] += 1
+                outcome = "false_alarm"
 
-        if outcome == "correct":
+        if outcome in ("correct", "correct_warned"):
             hard_spot_stats[category]["correct"] += 1
 
         results.append({
@@ -186,11 +220,17 @@ def run_evaluation(cases: List[Dict[str, Any]], mode: str = "live", model_name: 
 
     total = len(cases)
     elapsed_sec = round(time.time() - start_time, 2)
+    # accuracy dè dặt: "friction" KHÔNG được tính là đúng.
     accuracy = (tp + tn) / total if total > 0 else 0.0
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
     f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
-    fp_rate = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+
+    # Mẫu số là TOÀN BỘ thư sạch (kể cả thư bị gán WARNING), nên fp_rate vẫn
+    # là "tỷ lệ thư sạch bị gán NGUY HIỂM" — đúng loại sai mà quality bar nhắm tới.
+    total_safe = fp + tn + friction
+    fp_rate = fp / total_safe if total_safe > 0 else 0.0
+    friction_rate = friction / total_safe if total_safe > 0 else 0.0
     fn_rate = fn / (tp + fn) if (tp + fn) > 0 else 0.0
 
     category_summary = {}
@@ -219,13 +259,15 @@ def run_evaluation(cases: List[Dict[str, Any]], mode: str = "live", model_name: 
             "recall": round(recall, 4),
             "f1_score": round(f1, 4),
             "fp_rate": round(fp_rate, 4),
-            "fn_rate": round(fn_rate, 4)
+            "fn_rate": round(fn_rate, 4),
+            "friction_rate": round(friction_rate, 4)
         },
         "confusion_matrix": {
             "tp": tp,
             "fp": fp,
             "tn": tn,
-            "fn": fn
+            "fn": fn,
+            "friction": friction
         },
         "hybrid_architecture_stats": {
             "rule_based_hits": rule_hits,
@@ -254,9 +296,10 @@ def print_cli_summary(report: Dict[str, Any]) -> None:
     print(f"   * Recall    (Do bao phu Phishing): {m['recall'] * 100:.1f}%  (Muc tieu: >= 95.0%)")
     print(f"   * F1-Score  (Dung hoa F1)        : {m['f1_score'] * 100:.1f}%")
     print(f"   * False Positive Rate (Bao nham) : {m['fp_rate'] * 100:.1f}%  (Muc tieu: < 5.0%)")
+    print(f"   * Friction Rate (thu sach -> WARNING): {m.get('friction_rate', 0) * 100:.1f}%  (canh bao, KHONG chan)")
     print(f"   * False Negative Rate (Bo sot)  : {m['fn_rate'] * 100:.1f}%  (Rui ro cao nhat!)")
     print("-" * 75)
-    print(f"[CONFUSION MATRIX] TP={cm['tp']} | TN={cm['tn']} | FP={cm['fp']} (Bao nham) | FN={cm['fn']} (Bo sot)")
+    print(f"[CONFUSION MATRIX] TP={cm['tp']} | TN={cm['tn']} | FP={cm['fp']} (Bao nham) | FN={cm['fn']} (Bo sot) | Friction={cm.get('friction', 0)} (thu sach -> WARNING)")
     print("-" * 75)
     print("[HYBRID STATS] HIEU QUA MO HINH LAI (RULE vs LLM):")
     print(f"   * Rule-based Engine xu ly      : {hb['rule_based_hits']}/{report['total_cases']} cases ({hb['rule_hit_rate_pct']}%) -> TIET KIEM LLM TOKEN")
