@@ -114,8 +114,6 @@
     border: 1px solid var(--line); border-radius: 12px; padding: 2px 7px; white-space: nowrap; }
   .step .badge { margin-left: auto; }
   .step .badge + .badge { margin-left: 6px; }
-  /* Bước đã thiết kế nhưng backend chưa dựng xong — đánh dấu trung thực thay vì giấu đi. */
-  .badge.soon { border-style: dashed; }
   .spin { width: 12px; height: 12px; border: 2px solid var(--accent); border-right-color: transparent;
     border-radius: 50%; animation: sp .6s linear infinite; }
   @keyframes sp { to { transform: rotate(360deg); } }
@@ -222,7 +220,6 @@
       placeholder="Dán toàn bộ email vào đây — gồm cả header (From, Reply-To, Subject...) nếu có.&#10;&#10;Hoặc bấm một ví dụ ở trên để thử nhanh."></textarea>
     <div class="controls">
       <button class="btn primary" id="analyzeBtn">🛡️ Phân tích email</button>
-      <button class="btn ghost" id="emlBtn">📎 Tải file .eml <span class="badge soon">sắp có</span></button>
       <span class="filehint" id="fileHint"></span>
     </div>
   </section>
@@ -232,7 +229,7 @@
     <h3>Đang phân tích…</h3>
     <div class="steps" id="steps">
       <div class="step" data-step="0"><span class="tick">1</span> Bóc tách header, nội dung &amp; đường link <span class="badge">no AI</span></div>
-      <div class="step" data-step="1"><span class="tick">2</span> Kiểm tra xác thực SPF / DKIM / DMARC &amp; domain <span class="badge">no AI</span><span class="badge soon">sắp có</span></div>
+      <div class="step" data-step="1"><span class="tick">2</span> Đối chiếu tên miền với whitelist công ty <span class="badge">no AI</span></div>
       <div class="step" data-step="2"><span class="tick">3</span> Phân tích thủ đoạn thao túng bằng AI <span class="badge">AI</span></div>
       <div class="step" data-step="3"><span class="tick">4</span> Tổng hợp bằng chứng &amp; chấm mức rủi ro <span class="badge">guardrail</span></div>
     </div>
@@ -269,9 +266,11 @@
   (OpenAI) cho bước suy luận thủ đoạn ở backend — xem <code>codebase/</code>. Dữ liệu nền lấy theo
   <code>company_policy/domain-whitelist.json</code>: công ty mẫu <code>vinai.io</code>, <code>vlearn.vn</code>.
   <br>
-  <b>Phạm vi hiện tại.</b> Backend bản đang chạy mới xử lý <b>đường link (URL)</b>. Các bước gắn nhãn
-  <span class="badge soon">sắp có</span> — đọc header <code>.eml</code> và đối chiếu SPF / DKIM / DMARC — đã có trong thiết kế
-  nhưng <b>chưa được dựng</b>; trang này mô phỏng trước để chốt trải nghiệm.
+  <b>Phạm vi (đã chốt).</b> PhishShield soi <b>tên miền và đường link</b>. Sản phẩm <b>không</b>
+  kiểm tra SPF / DKIM / DMARC và <b>không</b> nhận tệp <code>.eml</code> — cả hai đều nằm ngoài phạm vi
+  đã chốt cho bài này. Sản phẩm chạy dưới dạng <b>tiện ích Chrome</b> ngay trong hộp thư, nên không
+  cần bước tải tệp; còn header xác thực thì Gmail không cho đọc trực tiếp từ DOM.
+  Khi thiếu dữ liệu, hệ thống hạ độ tin cậy chứ không đoán liều.
 </div>
 
 <div class="toast" id="toast"></div>
@@ -479,11 +478,6 @@
       fileHint.textContent = "";
       input.focus();
     });
-  });
-
-  $("emlBtn").addEventListener("click", function () {
-    input.value = SAMPLES.phish;
-    fileHint.textContent = "📄 email-nghi-ngo.eml (mô phỏng)";
   });
 
   function groupHTML(title, items) {

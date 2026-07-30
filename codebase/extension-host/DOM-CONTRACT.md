@@ -86,39 +86,37 @@ không phải sửa logic, vì bài toán y hệt.
 
 ---
 
-## 5. ⚠ Khác biệt thật giữa host giả lập và Gmail
+## 5. Phạm vi: KHÔNG kiểm tra SPF / DKIM / DMARC
 
-Đọc kỹ phần này trước khi ước lượng thời gian.
+**Đã chốt (2026-07-30): xác thực header nằm NGOÀI phạm vi.**
 
-**Gmail KHÔNG có sẵn `Authentication-Results` trong DOM.**
-Host giả lập cho bạn `[data-ps-field="raw-headers"]` vì nó tiện. Gmail thật thì
-SPF/DKIM/DMARC nằm sau *"Hiển thị bản gốc"*, mở ra một URL khác
-(`?view=om`) — content script **không lấy được bằng một câu querySelector**.
+PhishShield kết luận dựa trên **tên miền người gửi, nội dung, và đường link**.
+Không dùng SPF/DKIM/DMARC.
 
-Nghĩa là trên Gmail thật, tầng luật tĩnh sẽ **thiếu toàn bộ bằng chứng xác thực**
-và chỉ còn: tên miền người gửi, nội dung, và đường link.
+Vì sao chốt như vậy:
 
-Ba hướng xử lý, chọn một và **ghi rõ vào `spec.md`**:
+- **Gmail không cho lấy.** `Authentication-Results` không nằm trong DOM — nó ở sau
+  *"Hiển thị bản gốc"*, tại một URL khác (`?view=om`). Muốn có thì phải xin thêm
+  quyền hoặc đi qua Gmail API + OAuth. Quá nặng so với giá trị mang lại ở phạm vi bài này.
+- **Không mô phỏng trung thực được.** Nhóm không có email thật với header xác thực
+  thật, nên mọi `spf=fail` trong bộ test đều là do mình tự viết ra. Đo một thứ tự
+  mình bịa thì con số không nói lên điều gì.
 
-1. **Khai báo là giới hạn đã biết.** Trên Gmail, PhishShield hạ độ tin cậy xuống
-   `TRUNG BÌNH` và ghi "Thiếu: header xác thực" — đúng cơ chế guardrail sẵn có.
-   *Rẻ nhất, và trung thực.*
-2. **Fetch `?view=om`** từ service worker bằng cookie phiên của người dùng.
-   Lấy được header thật, nhưng thêm quyền và thêm rủi ro.
-3. **Dùng Gmail API** (`users.messages.get`). Sạch nhất, nhưng phải OAuth —
-   quá nặng cho hackathon.
+Không phải "sắp có". Đây là **giới hạn được khai báo**, ghi rõ trong `spec.md`.
+Guardrail sẵn có đã xử lý đúng: thiếu dữ liệu thì hạ độ tin cậy, không đoán liều.
 
-Khuyến nghị: **hướng 1**. Nó biến một giới hạn kỹ thuật thành đúng cái hành vi
-guardrail mà sản phẩm vốn phải có, và không tốn thêm quyền nào.
+> `[data-ps-field="raw-headers"]` vẫn còn trong host giả lập và vẫn là **tuỳ chọn**.
+> Adapter cứ đọc nếu có, nhưng **không được coi là điều kiện bắt buộc** — Gmail sẽ
+> trả về `""`, và mọi thứ vẫn phải chạy đúng.
 
-Khác biệt còn lại:
+Khác biệt còn lại giữa host giả lập và Gmail:
 
 | | Host giả lập | Gmail thật |
 |---|---|---|
 | Selector | `data-ps-*`, ổn định | class rối, đổi bất thường |
 | Thư trong chuỗi | 1 thư / 1 thread | nhiều thư, có thư bị gập |
 | Thân thư | HTML thẳng | nằm trong `iframe` ở một số chế độ |
-| Header xác thực | có sẵn | **không có** (xem trên) |
+| Header xác thực | có sẵn (tuỳ chọn) | không có — **và không dùng đến** (xem §5) |
 
 ---
 

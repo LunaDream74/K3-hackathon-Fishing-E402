@@ -159,26 +159,21 @@
     return chrome.runtime.sendMessage({ type: "PS_ANALYZE", text, path });
   }
 
-  /* Engine v1 nhận MỘT chuỗi text và tự dò link bằng regex. Nếu ném nguyên
-     header thô vào, nó sẽ coi cả hostname của máy chủ nhận thư
-     (vd "mx.example.com" trong Authentication-Results) là một đường link lạ,
-     rồi hạ mọi thư — kể cả thư sạch — xuống "chưa kết luận".
-     Vì vậy chỉ chuyển những phần thật sự có ý nghĩa, và rút kết quả xác thực
-     ra dạng chữ thay vì để nguyên dòng có hostname. */
+  /* Engine nhận MỘT chuỗi text và tự dò link bằng regex, nên không được ném
+     nguyên header thô vào: hostname của máy chủ nhận thư (vd "mx.example.com"
+     trong Authentication-Results) sẽ bị đếm là một đường link lạ và kéo cả thư
+     sạch xuống "nghi vấn". Chỉ gửi đúng phần có ý nghĩa.
+
+     PHẠM VI: KHÔNG đọc SPF / DKIM / DMARC. Gmail không cho lấy chúng từ DOM, và
+     nhóm cũng không có email thật để mô phỏng cho trung thực — xem DOM-CONTRACT §5.
+     Kết luận dựa trên tên miền người gửi, nội dung và đường link. */
   function composeForEngine(t) {
     const lines = [`Chủ đề: ${t.subject}`, `Người gửi: ${t.fromName} <${t.fromAddress}>`];
 
-    const raw = t.rawHeaders || "";
-    const replyTo = (raw.match(/^Reply-?To:[ \t]*(.+)$/im) || [])[1];
+    // Reply-To khác người gửi là dấu hiệu đọc được ở mọi hộp thư, không cần
+    // tới cơ chế xác thực nào — nên vẫn dùng.
+    const replyTo = (t.rawHeaders || "").match(/^Reply-?To:[ \t]*(.+)$/im)?.[1];
     if (replyTo) lines.push(`Reply-To: ${replyTo.trim()}`);
-
-    const auth = ["spf", "dkim", "dmarc"]
-      .map((k) => {
-        const m = raw.match(new RegExp(k + "=(\\w+)", "i"));
-        return m ? `${k}=${m[1]}` : null;
-      })
-      .filter(Boolean);
-    if (auth.length) lines.push(`Kết quả xác thực: ${auth.join(" ")}`);
 
     return lines.join("\n") + "\n\n" + t.bodyText;
   }
