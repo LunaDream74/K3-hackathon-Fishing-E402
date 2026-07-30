@@ -110,8 +110,12 @@
     display: grid; place-items: center; flex: none; font-size: 12px; }
   .step.on .tick { border-color: var(--accent); color: var(--accent-2); }
   .step.done .tick { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .step .badge { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-3);
-    border: 1px solid var(--line); border-radius: 12px; padding: 2px 7px; }
+  .badge { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-3);
+    border: 1px solid var(--line); border-radius: 12px; padding: 2px 7px; white-space: nowrap; }
+  .step .badge { margin-left: auto; }
+  .step .badge + .badge { margin-left: 6px; }
+  /* Bước đã thiết kế nhưng backend chưa dựng xong — đánh dấu trung thực thay vì giấu đi. */
+  .badge.soon { border-style: dashed; }
   .spin { width: 12px; height: 12px; border: 2px solid var(--accent); border-right-color: transparent;
     border-radius: 50%; animation: sp .6s linear infinite; }
   @keyframes sp { to { transform: rotate(360deg); } }
@@ -218,7 +222,7 @@
       placeholder="Dán toàn bộ email vào đây — gồm cả header (From, Reply-To, Subject...) nếu có.&#10;&#10;Hoặc bấm một ví dụ ở trên để thử nhanh."></textarea>
     <div class="controls">
       <button class="btn primary" id="analyzeBtn">🛡️ Phân tích email</button>
-      <button class="btn ghost" id="emlBtn">📎 Tải file .eml</button>
+      <button class="btn ghost" id="emlBtn">📎 Tải file .eml <span class="badge soon">sắp có</span></button>
       <span class="filehint" id="fileHint"></span>
     </div>
   </section>
@@ -228,7 +232,7 @@
     <h3>Đang phân tích…</h3>
     <div class="steps" id="steps">
       <div class="step" data-step="0"><span class="tick">1</span> Bóc tách header, nội dung &amp; đường link <span class="badge">no AI</span></div>
-      <div class="step" data-step="1"><span class="tick">2</span> Kiểm tra xác thực SPF / DKIM / DMARC &amp; domain <span class="badge">no AI</span></div>
+      <div class="step" data-step="1"><span class="tick">2</span> Kiểm tra xác thực SPF / DKIM / DMARC &amp; domain <span class="badge">no AI</span><span class="badge soon">sắp có</span></div>
       <div class="step" data-step="2"><span class="tick">3</span> Phân tích thủ đoạn thao túng bằng AI <span class="badge">AI</span></div>
       <div class="step" data-step="3"><span class="tick">4</span> Tổng hợp bằng chứng &amp; chấm mức rủi ro <span class="badge">guardrail</span></div>
     </div>
@@ -262,7 +266,12 @@
 <div class="pagefoot">
   <b>Về bản demo này.</b> Đây là bản mô phỏng trải nghiệm (mức <b>Mock</b>). Việc phân tích trong trang này chạy
   bằng bộ luật rút gọn ngay trên trình duyệt để minh hoạ luồng và đầu ra. Sản phẩm thật thực hiện <b>một lời gọi AI thật</b>
-  (OpenAI) cho bước suy luận thủ đoạn ở backend — xem <code>codebase/</code>. Whitelist công ty mẫu: <code>acme-corp.com</code>.
+  (OpenAI) cho bước suy luận thủ đoạn ở backend — xem <code>codebase/</code>. Dữ liệu nền lấy theo
+  <code>company_policy/domain-whitelist.json</code>: công ty mẫu <code>vinai.io</code>, <code>vlearn.vn</code>.
+  <br>
+  <b>Phạm vi hiện tại.</b> Backend bản đang chạy mới xử lý <b>đường link (URL)</b>. Các bước gắn nhãn
+  <span class="badge soon">sắp có</span> — đọc header <code>.eml</code> và đối chiếu SPF / DKIM / DMARC — đã có trong thiết kế
+  nhưng <b>chưa được dựng</b>; trang này mô phỏng trước để chốt trải nghiệm.
 </div>
 
 <div class="toast" id="toast"></div>
@@ -271,33 +280,37 @@
 (function () {
   "use strict";
 
-  // ---- company grounding (khớp company_policy/domain-whitelist.json) ----
-  var LEGIT = ["acme-corp.com", "acmecorp.com", "mail.acme-corp.com"];
-  var PORTALS = ["sso.acme-corp.com", "portal.acme-corp.com"];
-  var KNOWN_BAD = ["acme-corp-security.com", "acme-verify.com", "acmecorp-support.net",
-                   "acme-corp-verify.com", "mail-secure123.com"];
+  // ---- company grounding (sao chép nguyên các khoá của company_policy/domain-whitelist.json) ----
+  var COMPANY_DOMAINS  = ["vinai.io", "vlearn.vn", "vingroup.net", "vin-university.edu.vn"];
+  var TRUSTED_EXTERNAL = ["google.com", "gmail.com", "microsoft.com", "outlook.com", "office365.com",
+                          "github.com", "stackoverflow.com", "slack.com", "zoom.us", "teams.microsoft.com"];
+  var HIGH_RISK_EXT    = [".tk", ".ml", ".ga", ".cf", ".gq", ".xyz", ".top", ".work", ".club"];
+  var SUSPICIOUS_KW    = ["login-secure", "verify-account", "update-password", "bank-confirm",
+                          "security-alert", "support-team", "password-reset", "free-gift", "bonus-claim"];
+  // Nhãn thương hiệu suy ra từ company_domains — dùng để bắt domain nhái (giống brand_spoof ở backend).
+  var BRANDS = COMPANY_DOMAINS.map(function (d) { return d.split(".")[0]; });
 
   var SAMPLES = {
     phish:
-"From: IT Support <it-security@acme-corp-verify.com>\n" +
-"Reply-To: helpdesk@mail-secure123.com\n" +
+"From: IT Support <it-security@vinai-verify-account.tk>\n" +
+"Reply-To: helpdesk@mail-secure123.xyz\n" +
 "Subject: [KHẨN] Tài khoản của bạn sẽ bị khoá trong 30 phút\n" +
 "Authentication-Results: spf=fail dkim=fail dmarc=fail\n\n" +
 "Kính gửi nhân viên,\n\n" +
 "Hệ thống phát hiện hoạt động bất thường trên tài khoản của bạn. Tài khoản sẽ bị KHOÁ trong vòng 30 phút " +
 "nếu bạn không xác minh ngay lập tức.\n\n" +
-"Vui lòng đăng nhập để xác minh tài khoản tại: https://acme-corp-security.com/login\n\n" +
+"Vui lòng đăng nhập để xác minh tài khoản tại: https://vinai-verify-account.tk/login-secure\n\n" +
 "Trân trọng,\nPhòng IT / An ninh mạng",
 
     legit:
-"From: IT Support <it-support@acme-corp.com>\n" +
+"From: IT Support <it-support@vinai.io>\n" +
 "Subject: Thông báo bảo trì hệ thống email cuối tuần\n" +
 "Authentication-Results: spf=pass dkim=pass dmarc=pass\n\n" +
 "Chào các anh chị,\n\n" +
 "Phòng IT sẽ bảo trì hệ thống email định kỳ vào 22:00 Thứ Bảy tuần này. Một số dịch vụ có thể gián đoạn " +
 "trong khoảng 30 phút. Anh chị không cần thao tác gì thêm.\n\n" +
-"Thông tin trạng thái xem tại cổng nội bộ: https://portal.acme-corp.com/status\n\n" +
-"Trân trọng,\nPhòng IT — Acme Corp",
+"Thông tin trạng thái xem tại cổng nội bộ: https://vlearn.vn/status\n\n" +
+"Trân trọng,\nPhòng IT — VinAI",
 
     short:
 "Subject: Tài liệu\n\n" +
@@ -313,14 +326,24 @@
     var m = (addr || "").match(/@([^\s>]+)/);
     return m ? m[1].toLowerCase() : "";
   }
-  var BASE = ["acme-corp.com", "acmecorp.com"];
-  function isCompanyHost(h) {
+  function matchesAny(h, list) {
     if (!h) return false;
-    if (LEGIT.indexOf(h) !== -1 || PORTALS.indexOf(h) !== -1) return true;
-    return BASE.some(function (b) { return h === b || h.endsWith("." + b); });
+    return list.some(function (d) { return h === d || h.endsWith("." + d); });
   }
-  // Mentions the brand but is NOT a genuine company host → look-alike domain.
-  function isImpersonation(h) { return /acme/i.test(h) && !isCompanyHost(h); }
+  function isCompanyHost(h) { return matchesAny(h, COMPANY_DOMAINS); }
+  function isTrustedHost(h) { return matchesAny(h, TRUSTED_EXTERNAL); }
+  function hasHighRiskExt(h) {
+    return HIGH_RISK_EXT.some(function (e) { return (h || "").endsWith(e); });
+  }
+  function hasSuspiciousKw(u) {
+    var s = (u || "").toLowerCase();
+    return SUSPICIOUS_KW.some(function (k) { return s.indexOf(k) !== -1; });
+  }
+  // Mentions an internal brand but is NOT a genuine company host → look-alike domain.
+  function isImpersonation(h) {
+    if (!h || isCompanyHost(h)) return false;
+    return BRANDS.some(function (b) { return h.indexOf(b) !== -1; });
+  }
 
   function analyze(text) {
     var t = text || "";
@@ -378,14 +401,23 @@
     if (urls.length) {
       urls.forEach(function (u) {
         var h = host(u);
-        if (KNOWN_BAD.indexOf(h) !== -1 || isImpersonation(h)) {
-          score += 3; g.url.push(["Liên kết trỏ tới domain giả mạo: " + h, "bad"]);
+        if (isImpersonation(h)) {
+          score += 3; g.url.push(["Liên kết trỏ tới domain nhái thương hiệu nội bộ: " + h, "bad"]);
         } else if (/^\d+\.\d+\.\d+\.\d+/.test(h)) {
           score += 3; g.url.push(["Liên kết dùng địa chỉ IP thô thay vì tên miền: " + h, "bad"]);
+        } else if (hasHighRiskExt(h) && hasSuspiciousKw(u)) {
+          score += 3; g.url.push(["Đuôi tên miền rủi ro cao (" + h + ") kèm từ khoá thúc ép xác thực.", "bad"]);
         } else if (isCompanyHost(h)) {
           g.url.push(["Liên kết trỏ tới cổng chính thức của công ty (" + h + ").", "good"]);
+        } else if (isTrustedHost(h)) {
+          g.url.push(["Liên kết tới dịch vụ ngoài nằm trong danh sách tin cậy (" + h + ").", "good"]);
         } else {
-          score += 1; g.url.push(["Liên kết ngoài cần thận trọng: " + h, "warn"]);
+          var why = [];
+          if (hasHighRiskExt(h)) why.push("đuôi tên miền rủi ro cao");
+          if (hasSuspiciousKw(u)) why.push("chứa từ khoá thúc ép xác thực");
+          score += why.length ? 2 : 1;
+          g.url.push(["Liên kết ngoài cần thận trọng: " + h +
+                      (why.length ? " — " + why.join(", ") + "." : ""), "warn"]);
         }
       });
       if (credential && score >= 5)
