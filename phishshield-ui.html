@@ -1,0 +1,862 @@
+<title>PhishShield AI — Soi email trước khi bấm</title>
+<style>
+  /* ============================================================
+     PhishShield AI — design source of truth
+     ONE visual world: a forensic examination table.
+     The surround is a dark table; the email is a luminous sheet
+     of paper on it. Evidence is pinned to the line that caused it.
+     Committed single-theme by design — the light table IS the idea,
+     so it does not invert. Content stays black-on-white, which
+     survives a bright demo room.
+     Voice: mono = máy nói (bằng chứng) · sans = người nói (lời khuyên)
+     ============================================================ */
+  :root {
+    color-scheme: dark;
+
+    /* the table */
+    --table:    #101319;
+    --table-2:  #1a1e27;
+    --table-3:  #232834;
+    --edge:     #2e3442;
+    --on-table:    #eef1f7;   /* 15.8:1 on --table */
+    --on-table-2:  #b3bccc;   /* 8.6:1  on --table */
+    --on-table-3:  #8d97a8;   /*  5.4:1 on --table — floor for small text */
+
+    /* the paper */
+    --sheet:    #ffffff;
+    --gut:      #eef1f6;
+    --sheet-rule: #dfe4ec;
+    --on-sheet:   #0c0f14;    /* 18.9:1 on white */
+    --on-sheet-2: #495264;    /*  7.6:1 on white */
+
+    /* the examiner's blue pencil — one accent, two grounds */
+    --pencil:       #7d93ff;
+    --pencil-sheet: #1f34c4;
+    --pencil-soft:  #1b2340;
+
+    /* risk inks ON PAPER (all >= 4.9:1 on white) */
+    --s-bad:  #bf0f1d;  --s-bad-bg:  #fdeaeb;
+    --s-warn: #835500;  --s-warn-bg: #fbf0d8;
+    --s-good: #0a6a3e;  --s-good-bg: #e1f4e9;
+    --s-info: #495264;  --s-info-bg: #eef0f4;
+
+    /* risk inks ON THE TABLE (all >= 7:1 on --table) */
+    --t-bad:  #ff7d70;  --t-bad-bg:  #2f1311;  --t-bad-edge:  #7a2c25;
+    --t-warn: #ffbe52;  --t-warn-bg: #2d2007;  --t-warn-edge: #785412;
+    --t-good: #55dc99;  --t-good-bg: #0d2c1e;  --t-good-edge: #1c5f41;
+    --t-info: #b3bccc;  --t-info-bg: #1a1e27;  --t-info-edge: #2e3442;
+
+    --mono: ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace;
+    --sans: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--table); color: var(--on-table);
+    font-family: var(--sans); font-size: 16px; line-height: 1.55; -webkit-font-smoothing: antialiased;
+  }
+  button, textarea { font: inherit; color: inherit; }
+
+  /* ---------------- top rail ---------------- */
+  .rail {
+    position: sticky; top: 0; z-index: 30;
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px clamp(14px, 3.5vw, 30px);
+    background: var(--table); border-bottom: 1px solid var(--edge);
+  }
+  .wordmark {
+    font-family: var(--mono); font-size: 14px; font-weight: 700;
+    letter-spacing: .17em; text-transform: uppercase; white-space: nowrap; color: var(--on-table);
+  }
+  .wordmark i { font-style: normal; color: var(--pencil); }
+  .rail .grow { flex: 1; }
+  .status {
+    font-family: var(--mono); font-size: 13px; color: var(--on-table-2);
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .stamp {
+    font-family: var(--mono); font-size: 11.5px; font-weight: 600; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--on-table-2);
+    border: 1px solid var(--edge); border-radius: 2px; padding: 4px 9px; white-space: nowrap;
+  }
+  @media (max-width: 720px) { .status { display: none; } }
+
+  .shell { max-width: 1240px; margin: 0 auto; padding: clamp(16px, 3vw, 30px) clamp(14px, 3.5vw, 30px) 70px; }
+
+  /* ---------------- verdict band — unmissable on a projector ---------------- */
+  .band {
+    border: 1px solid var(--v-edge); border-left: 6px solid var(--v);
+    background: var(--v-bg); border-radius: 3px;
+    padding: clamp(18px, 2.6vw, 26px) clamp(18px, 2.6vw, 28px);
+    margin-bottom: clamp(16px, 2.4vw, 24px);
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px 26px; align-items: center;
+  }
+  @media (max-width: 780px) { .band { grid-template-columns: minmax(0, 1fr); } }
+
+  .b-bad     { --v: var(--t-bad);  --v-bg: var(--t-bad-bg);  --v-edge: var(--t-bad-edge); }
+  .b-doubt   { --v: var(--t-warn); --v-bg: var(--t-warn-bg); --v-edge: var(--t-warn-edge); }
+  .b-safe    { --v: var(--t-good); --v-bg: var(--t-good-bg); --v-edge: var(--t-good-edge); }
+  .b-unknown { --v: var(--t-info); --v-bg: var(--t-info-bg); --v-edge: var(--t-info-edge); }
+
+  .v-word {
+    font-family: var(--mono); font-weight: 700; color: var(--v);
+    font-size: clamp(34px, 6.2vw, 60px); line-height: .95; letter-spacing: -.035em; text-transform: uppercase;
+  }
+  .v-line { margin-top: 12px; font-size: clamp(16px, 1.9vw, 20px); color: var(--on-table); max-width: 44ch; }
+  .v-tags { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 15px; }
+  .tag {
+    font-family: var(--mono); font-size: 12.5px; font-weight: 600;
+    border: 1px solid var(--edge); background: var(--table); border-radius: 2px;
+    padding: 5px 10px; color: var(--on-table-2); font-variant-numeric: tabular-nums;
+  }
+  .tag.on { border-color: var(--v); color: var(--v); }
+
+  /* score dial — reads at a glance from the back of a room */
+  .dial { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+  .dial .num {
+    font-family: var(--mono); font-weight: 700; font-size: clamp(30px, 4.4vw, 46px); line-height: 1;
+    color: var(--v); font-variant-numeric: tabular-nums;
+  }
+  .dial .cap {
+    font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: .13em;
+    text-transform: uppercase; color: var(--on-table-2);
+  }
+  .bars { display: flex; gap: 3px; }
+  .bars i { width: 9px; height: 22px; border-radius: 1px; background: var(--table-3); transition: background .45s ease; }
+  .bars i.f { background: var(--v); }
+  @media (prefers-reduced-motion: reduce) { .bars i { transition: none; } }
+  @media (max-width: 780px) { .dial { align-items: flex-start; } }
+
+  /* ---------------- layout ---------------- */
+  .layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: clamp(16px, 2.2vw, 24px); align-items: start; }
+
+  /* The document stays pinned while the evidence rail scrolls past it.
+     The pin↔evidence cross-reference only works if both panes are on
+     screen at once — without this, hovering evidence #9 lights up a line
+     that has already scrolled away. Also kills the dead void the shorter
+     column used to leave. */
+  .docside { position: sticky; top: 74px; }
+  .docside .sheet { max-height: calc(100vh - 108px); display: flex; flex-direction: column; }
+  .docside .doc, .docside textarea.compose { overflow: auto; }
+
+  @media (max-width: 980px) {
+    .layout { grid-template-columns: minmax(0, 1fr); }
+    .docside { position: static; }
+    .docside .sheet { max-height: none; }
+  }
+
+  /* ---------------- the sheet of paper ---------------- */
+  .sheet {
+    background: var(--sheet); color: var(--on-sheet); border-radius: 3px;
+    box-shadow: 0 0 0 1px rgba(255,255,255,.06), 0 18px 44px -14px rgba(0,0,0,.75), 0 2px 6px rgba(0,0,0,.4);
+    overflow: hidden;
+  }
+  .sheet-hd {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 11px 16px; background: var(--gut); border-bottom: 1px solid var(--sheet-rule);
+  }
+  .sheet-hd .t {
+    font-family: var(--mono); font-size: 12px; font-weight: 700; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--on-sheet-2);
+  }
+  .sheet-hd .grow { flex: 1; }
+
+  /* sample chips live on the sheet header — a toolbar, not a hero */
+  .chips { display: flex; gap: 5px; flex-wrap: wrap; }
+  .chip {
+    cursor: pointer; border: 1px solid var(--sheet-rule); background: var(--sheet); color: var(--on-sheet-2);
+    font-family: var(--mono); font-size: 12.5px; font-weight: 600; padding: 5px 10px; border-radius: 2px;
+    transition: border-color .14s, color .14s, background .14s;
+  }
+  .chip:hover { border-color: var(--pencil-sheet); color: var(--pencil-sheet); }
+  .chip[aria-pressed="true"] { border-color: var(--pencil-sheet); background: var(--pencil-sheet); color: #fff; }
+  .chip:focus-visible { outline: 2px solid var(--pencil-sheet); outline-offset: 2px; }
+
+  textarea.compose {
+    display: block; width: 100%; min-height: 380px; resize: vertical; border: 0; outline: 0;
+    background: var(--sheet); color: var(--on-sheet); padding: 20px clamp(16px, 2vw, 22px);
+    font-family: var(--mono); font-size: 14.5px; line-height: 1.8;
+  }
+  textarea.compose::placeholder { color: var(--on-sheet-2); }
+
+  /* examined mode: ruled margin + line */
+  .doc { font-family: var(--mono); font-size: 14.5px; line-height: 1.8; padding: 10px 0 18px; }
+  /* Gutter must hold every pin on its busiest line — an Authentication-Results
+     line carries three (spf/dkim/dmarc). At 52px the third was being clipped,
+     which silently broke the pin↔evidence cross-reference. Sized for three,
+     with wrap as the safety valve rather than clipping. */
+  .ln { display: grid; grid-template-columns: 84px minmax(0, 1fr); align-items: start; }
+  .ln .gut {
+    display: flex; align-items: center; align-content: center; justify-content: flex-end;
+    flex-wrap: wrap; gap: 4px;
+    padding-right: 11px; min-height: 1.8em; user-select: none;
+    background: var(--gut); border-right: 1px solid var(--sheet-rule);
+    align-self: stretch;
+  }
+  .ln .txt { padding: 0 clamp(16px, 2vw, 22px) 0 14px; white-space: pre-wrap; word-break: break-word; min-height: 1.8em; }
+  .ln.blank .txt { min-height: .85em; }
+
+  /* solid numbered marks in the margin */
+  .pin {
+    font-family: var(--mono); font-size: 11px; font-weight: 700; line-height: 1;
+    width: 19px; height: 19px; border-radius: 50%; display: grid; place-items: center;
+    border: 0; cursor: pointer; color: #fff; padding: 0; flex: none;
+    transition: transform .14s, box-shadow .14s;
+  }
+  .pin.t-bad  { background: var(--s-bad); }
+  .pin.t-warn { background: var(--s-warn); }
+  .pin.t-good { background: var(--s-good); }
+  .pin.t-info { background: var(--s-info); }
+  .pin:focus-visible { outline: 2px solid var(--pencil-sheet); outline-offset: 2px; }
+  .pin:hover, .pin.lit { transform: scale(1.22); box-shadow: 0 0 0 3px rgba(31,52,196,.22); }
+
+  /* the highlighted span */
+  mark.hit { background: transparent; color: inherit; padding: 2px 3px; margin: 0 -1px; border-radius: 2px;
+             box-decoration-break: clone; -webkit-box-decoration-break: clone;
+             border-bottom: 2px solid currentColor; transition: background .14s; font-weight: 600; }
+  mark.hit.t-bad  { color: var(--s-bad); }
+  mark.hit.t-warn { color: var(--s-warn); }
+  mark.hit.t-good { color: var(--s-good); }
+  mark.hit.t-info { color: var(--s-info); }
+  mark.hit.lit.t-bad  { background: var(--s-bad-bg); }
+  mark.hit.lit.t-warn { background: var(--s-warn-bg); }
+  mark.hit.lit.t-good { background: var(--s-good-bg); }
+  mark.hit.lit.t-info { background: var(--s-info-bg); }
+
+  /* the examiner working down the page */
+  .doc.revealing .pin, .doc.revealing mark.hit { opacity: 0; }
+  .doc.revealing .pin.seen, .doc.revealing mark.hit.seen { opacity: 1; transition: opacity .26s ease; }
+  @media (prefers-reduced-motion: reduce) {
+    .doc.revealing .pin, .doc.revealing mark.hit { opacity: 1; }
+    .pin { transition: none; }
+  }
+
+  /* ---------------- evidence rail (on the table) ---------------- */
+  .rail-hd {
+    display: flex; align-items: baseline; gap: 9px; margin: 0 0 10px;
+    font-family: var(--mono); font-size: 12px; font-weight: 700; letter-spacing: .13em;
+    text-transform: uppercase; color: var(--on-table-2);
+  }
+  .rail-hd .n { color: var(--on-table-3); font-variant-numeric: tabular-nums; letter-spacing: .04em; }
+
+  .evgroup { border: 1px solid var(--edge); border-radius: 3px; background: var(--table-2); overflow: hidden; }
+  .evgroup + .evgroup { margin-top: 10px; }
+  .evgroup > h3 {
+    margin: 0; padding: 9px 13px; background: var(--table-3);
+    font-family: var(--mono); font-size: 11.5px; font-weight: 700;
+    letter-spacing: .13em; text-transform: uppercase; color: var(--on-table-2);
+  }
+  .evlist { list-style: none; margin: 0; padding: 0; }
+  .ev {
+    display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 11px; align-items: start;
+    width: 100%; text-align: left; cursor: pointer;
+    background: transparent; border: 0; border-top: 1px solid var(--edge);
+    padding: 12px 13px; color: var(--on-table);
+    font-size: 15px; line-height: 1.5; transition: background .14s;
+  }
+  .evlist li:first-child .ev { border-top: 0; }
+  .ev:hover, .ev.lit { background: var(--table-3); }
+  .ev:focus-visible { outline: 2px solid var(--pencil); outline-offset: -2px; }
+  .ev .k {
+    font-family: var(--mono); font-size: 11px; font-weight: 700; line-height: 1;
+    width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
+    color: #101319; margin-top: 2px;
+  }
+  .ev.t-bad  .k { background: var(--t-bad); }
+  .ev.t-warn .k { background: var(--t-warn); }
+  .ev.t-good .k { background: var(--t-good); }
+  .ev.t-info .k { background: var(--t-info); }
+  .ev .no-anchor {
+    color: var(--on-table-3); font-family: var(--mono); font-size: 11.5px; white-space: nowrap;
+  }
+
+  /* ---------------- action ---------------- */
+  .act {
+    margin-top: 14px; border: 1px solid var(--v-edge); border-left: 4px solid var(--v);
+    border-radius: 3px; background: var(--v-bg); padding: 15px 17px;
+  }
+  .act h3 {
+    margin: 0 0 8px; font-family: var(--mono); font-size: 12px; font-weight: 700;
+    letter-spacing: .13em; text-transform: uppercase; color: var(--v);
+  }
+  .act p { margin: 0; font-size: 15px; color: var(--on-table); }
+  .act .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+
+  .btn {
+    cursor: pointer; border: 1px solid var(--edge); background: var(--table-3); color: var(--on-table);
+    font-family: var(--mono); font-size: 13px; font-weight: 600;
+    padding: 10px 15px; border-radius: 2px; transition: border-color .14s, background .14s;
+  }
+  .btn:hover { border-color: var(--on-table-3); background: var(--edge); }
+  .btn:focus-visible { outline: 2px solid var(--pencil); outline-offset: 2px; }
+  .btn.key { background: var(--on-table); color: var(--table); border-color: var(--on-table); font-weight: 700; }
+  .btn.key:hover { background: #fff; }
+  .btn.pencil { border-color: var(--pencil); color: var(--pencil); background: var(--pencil-soft); }
+  .btn.pencil:hover { background: #232d54; }
+
+  .limits {
+    margin-top: 14px; border-top: 1px solid var(--edge); padding-top: 12px;
+    font-size: 13.5px; color: var(--on-table-2); line-height: 1.6;
+  }
+  .limits b { color: var(--on-table); font-weight: 600; }
+  .limits code { font-family: var(--mono); font-size: 12.5px; color: var(--pencil); }
+
+  .hidden { display: none !important; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%) translateY(14px);
+    background: var(--on-table); color: var(--table); padding: 11px 17px; border-radius: 2px;
+    font-family: var(--mono); font-size: 13px; font-weight: 600;
+    opacity: 0; transition: .2s; z-index: 50; pointer-events: none;
+    max-width: calc(100vw - 32px); text-align: center;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+
+  .foot {
+    max-width: 1240px; margin: 0 auto; padding: 0 clamp(14px, 3.5vw, 30px) 44px;
+    font-size: 13px; color: var(--on-table-2); line-height: 1.7;
+  }
+  .foot code { font-family: var(--mono); font-size: 12.5px; color: var(--pencil); }
+  .foot b { color: var(--on-table); }
+</style>
+
+<div class="rail">
+  <span class="wordmark">Phish<i>Shield</i></span>
+  <span class="grow"></span>
+  <span class="status" id="status"></span>
+  <span class="stamp">Bản thiết kế</span>
+</div>
+
+<div class="shell">
+  <!-- VERDICT BAND -->
+  <div class="band hidden" id="band">
+    <div>
+      <div class="v-word" id="vWord">—</div>
+      <div class="v-line" id="vLine"></div>
+      <div class="v-tags" id="vTags"></div>
+    </div>
+    <div class="dial" id="dial"></div>
+  </div>
+
+  <div class="layout">
+    <!-- LEFT: the sheet -->
+    <div class="docside">
+      <div class="sheet">
+        <div class="sheet-hd">
+          <span class="t" id="sheetTitle">Email đã soi</span>
+          <span class="grow"></span>
+          <div class="chips" id="chips"></div>
+        </div>
+        <textarea class="compose hidden" id="compose" spellcheck="false"
+          placeholder="Dán toàn bộ email vào đây.&#10;&#10;Kèm cả phần header (From, Reply-To, Authentication-Results…) nếu bạn lấy được — có header thì kết luận chắc chắn hơn nhiều."></textarea>
+        <div class="doc" id="doc"></div>
+      </div>
+
+      <div class="act hidden" id="compAct" style="--v: var(--pencil); --v-bg: var(--table-2); --v-edge: var(--edge);">
+        <h3>Dán email cần soi</h3>
+        <p>PhishShield chỉ đọc nội dung bạn dán vào — không mở liên kết, không tải tệp đính kèm.</p>
+        <div class="row">
+          <button class="btn key" id="runBtn" type="button">Kiểm tra email</button>
+          <button class="btn" id="clearBtn" type="button">Xoá</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: evidence -->
+    <div id="panel">
+      <div class="rail-hd"><span>Bằng chứng</span><span class="n" id="evCount"></span></div>
+      <div id="evidence"></div>
+      <div class="act" id="action"></div>
+      <div class="limits" id="limits"></div>
+    </div>
+  </div>
+</div>
+
+<div class="foot">
+  <b>Về trang này.</b> Đây là <b>bản thiết kế giao diện</b> (design source of truth) của PhishShield AI.
+  Phần chấm điểm chạy bằng bộ luật rút gọn ngay trên trình duyệt để demo được đủ 4 tình huống.
+  Sản phẩm thật thay lớp này bằng một lời gọi AI thật ở backend, trả về đúng cấu trúc trong
+  <code>window.PHISHSHIELD_CONTRACT</code>. Dữ liệu nền theo
+  <code>codebase/company_policy/domain-whitelist.json</code>.
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ==========================================================
+     1. GROUNDING — mirrors company_policy/domain-whitelist.json
+     ========================================================== */
+  var COMPANY_DOMAINS  = ["vinai.io", "vlearn.vn", "vingroup.net", "vin-university.edu.vn"];
+  var TRUSTED_EXTERNAL = ["google.com", "gmail.com", "microsoft.com", "outlook.com", "office365.com",
+                          "github.com", "stackoverflow.com", "slack.com", "zoom.us", "teams.microsoft.com"];
+  var HIGH_RISK_EXT    = [".tk", ".ml", ".ga", ".cf", ".gq", ".xyz", ".top", ".work", ".club"];
+  var SUSPICIOUS_KW    = ["login-secure", "verify-account", "update-password", "bank-confirm",
+                          "security-alert", "support-team", "password-reset", "free-gift", "bonus-claim"];
+  var BRANDS = COMPANY_DOMAINS.map(function (d) { return d.split(".")[0]; });
+
+  /* ==========================================================
+     2. THE CONTRACT the backend must satisfy.
+     ========================================================== */
+  window.PHISHSHIELD_CONTRACT = {
+    verdict: "DANGER | DOUBT | SAFE | UNKNOWN",
+    headline: "một câu tiếng Việt, chủ ngữ là người dùng",
+    risk_score: "0-100, hoặc null khi verdict = UNKNOWN",
+    confidence: "CAO | TRUNG BÌNH | THẤP",
+    missing: ["tên những thứ thiếu, ví dụ: 'header xác thực'"],
+    evidence: [{
+      group: "XÁC THỰC | NỘI DUNG | LIÊN KẾT",
+      tone: "bad | warn | good | info",
+      text: "câu giải thích, tiếng Việt, không thuật ngữ trần trụi",
+      anchor: "chuỗi con XUẤT HIỆN NGUYÊN VĂN trong email — UI gạch chân đúng chỗ này (có thể null)"
+    }],
+    action: { title: "việc nên làm", body: "hướng dẫn cụ thể", offer_headers: "true khi cần user dán thêm header" }
+  };
+
+  /* ==========================================================
+     3. Samples — one per experience path (spec §6 / R3)
+     ========================================================== */
+  var SAMPLES = [
+    { id: "phish", label: "Giả mạo IT", path: "happy", text:
+"From: IT Support <it-security@vinai-verify-account.tk>\n" +
+"Reply-To: helpdesk@mail-secure123.xyz\n" +
+"Subject: [KHẨN] Tài khoản của bạn sẽ bị khoá trong 30 phút\n" +
+"Authentication-Results: spf=fail dkim=fail dmarc=fail\n" +
+"\n" +
+"Kính gửi nhân viên,\n" +
+"\n" +
+"Hệ thống ghi nhận hoạt động bất thường. Tài khoản của bạn sẽ bị khoá trong 30 phút\n" +
+"nếu không xác minh ngay lập tức.\n" +
+"\n" +
+"Xác minh tại: https://vinai-verify-account.tk/login-secure\n" +
+"\n" +
+"Phòng IT / An ninh mạng" },
+
+    { id: "legit", label: "IT thật", path: "happy", text:
+"From: IT Support <it-support@vinai.io>\n" +
+"Subject: Bảo trì hệ thống email cuối tuần\n" +
+"Authentication-Results: spf=pass dkim=pass dmarc=pass\n" +
+"\n" +
+"Chào các anh chị,\n" +
+"\n" +
+"Phòng IT bảo trì hệ thống email định kỳ vào 22:00 Thứ Bảy tuần này.\n" +
+"Một số dịch vụ có thể gián đoạn khoảng 30 phút. Anh chị không cần thao tác gì thêm.\n" +
+"\n" +
+"Trạng thái hệ thống: https://vlearn.vn/status\n" +
+"\n" +
+"Phòng IT — VinAI" },
+
+    { id: "thin", label: "Thiếu header", path: "low-confidence", text:
+"Chào bạn,\n" +
+"\n" +
+"Phòng nhân sự cần bạn cập nhật lại thông tin tài khoản trước thứ Sáu.\n" +
+"Bạn đăng nhập giúp mình nhé.\n" +
+"\n" +
+"Cảm ơn bạn." },
+
+    { id: "none", label: "Không phải email", path: "failure", text:
+"đơn hàng #4471 giao lúc 3h chiều nhé anh" }
+  ];
+
+  var CORRECTED =
+"From: HR VinAI <hr-notice@vinai-hronline.top>\n" +
+"Reply-To: hr.verify@mail-secure123.xyz\n" +
+"Authentication-Results: spf=fail dkim=none dmarc=fail\n" +
+"Subject: Cập nhật thông tin tài khoản trước thứ Sáu\n" +
+"\n" +
+"Chào bạn,\n" +
+"\n" +
+"Phòng nhân sự cần bạn cập nhật lại thông tin tài khoản trước thứ Sáu.\n" +
+"Bạn đăng nhập giúp mình nhé.\n" +
+"\n" +
+"Cảm ơn bạn.";
+
+  /* ==========================================================
+     4. Analyzer (stand-in for the backend call)
+     ========================================================== */
+  function hostOf(url) {
+    var h = String(url).replace(/^[a-z]+:\/\//i, "").split(/[\/?#]/)[0].toLowerCase();
+    return h.indexOf("www.") === 0 ? h.slice(4) : h;
+  }
+  function domainOf(addr) { var m = String(addr || "").match(/@([^\s>]+)/); return m ? m[1].toLowerCase() : ""; }
+  function matches(h, list) { return !!h && list.some(function (d) { return h === d || h.endsWith("." + d); }); }
+  function isCompany(h) { return matches(h, COMPANY_DOMAINS); }
+  function isTrusted(h) { return matches(h, TRUSTED_EXTERNAL); }
+  function riskyExt(h) { return HIGH_RISK_EXT.some(function (e) { return String(h).endsWith(e); }); }
+  function pushyKw(u) { var s = String(u).toLowerCase(); return SUSPICIOUS_KW.filter(function (k) { return s.indexOf(k) !== -1; }); }
+  function looksLikeBrand(h) {
+    return !!h && !isCompany(h) && BRANDS.some(function (b) { return h.indexOf(b) !== -1; });
+  }
+
+  function analyze(raw) {
+    var t = String(raw || ""), low = t.toLowerCase();
+    var ev = [], score = 0;
+
+    var fromLine  = (t.match(/^From:[ \t]*(.+)$/im) || [])[1] || "";
+    var replyLine = (t.match(/^Reply-?To:[ \t]*(.+)$/im) || [])[1] || "";
+    var fromDom = domainOf(fromLine), replyDom = domainOf(replyLine);
+    var display = fromLine.replace(/<[^>]*>/, "").replace(/["']/g, "").trim();
+    var spf   = (low.match(/spf=(\w+)/)   || [])[1] || "";
+    var dkim  = (low.match(/dkim=(\w+)/)  || [])[1] || "";
+    var dmarc = (low.match(/dmarc=(\w+)/) || [])[1] || "";
+    var urls  = t.match(/https?:\/\/[^\s<>"')\]]+/gi) || [];
+    var hasHeaders = /^(From|Reply-?To|Return-Path|Authentication-Results):/im.test(t);
+    var missing = [];
+
+    /* ---- FAILURE PATH ---- */
+    var wordCount = t.trim().split(/\s+/).filter(Boolean).length;
+    if (!hasHeaders && !urls.length && wordCount < 12 && !/^Subject:/im.test(t)) {
+      return {
+        verdict: "UNKNOWN", word: "Chưa kết luận",
+        headline: "Đoạn này chưa đủ để coi là một email cần soi.",
+        score: null, confidence: "THẤP",
+        missing: ["header người gửi", "liên kết"],
+        evidence: [
+          { group: "XÁC THỰC", tone: "info", text: "Không có dòng From, Reply-To hay Authentication-Results nào để đối chiếu.", anchor: null },
+          { group: "LIÊN KẾT", tone: "info", text: "Không có liên kết nào trong đoạn văn bản.", anchor: null }
+        ],
+        action: {
+          title: "Việc nên làm",
+          body: "Dán lại <b>toàn bộ</b> email — cả header lẫn nội dung. PhishShield không đoán khi chưa có căn cứ, vì đoán sai ở đây tốn kém hơn là im lặng.",
+          offer: null
+        }
+      };
+    }
+
+    /* ---- authentication ----
+       Pushed in the order these appear in an Authentication-Results line
+       (spf, dkim, dmarc) so the margin pins read 1·2·3 down the gutter. */
+    if (spf   === "fail") { score += 2; ev.push({ group: "XÁC THỰC", tone: "bad", text: "SPF thất bại — máy chủ gửi không nằm trong danh sách được domain uỷ quyền.", anchor: "spf=fail" }); }
+    if (dkim  === "fail") { score += 1; ev.push({ group: "XÁC THỰC", tone: "bad", text: "DKIM thất bại — chữ ký số của email không hợp lệ.", anchor: "dkim=fail" }); }
+    if (dmarc === "fail") { score += 3; ev.push({ group: "XÁC THỰC", tone: "bad", text: "DMARC thất bại — email không chứng minh được nó gửi từ đúng tổ chức nó khai.", anchor: "dmarc=fail" }); }
+    if (spf === "pass" && dmarc === "pass")
+      ev.push({ group: "XÁC THỰC", tone: "good", text: "SPF, DKIM, DMARC đều đạt — email đúng là gửi từ máy chủ được uỷ quyền.", anchor: "spf=pass dkim=pass dmarc=pass" });
+    if (!spf && !dkim && !dmarc) missing.push("header xác thực");
+
+    if (fromDom) {
+      if (isCompany(fromDom)) {
+        ev.push({ group: "XÁC THỰC", tone: "good", text: "Người gửi thuộc domain chính thức của công ty.", anchor: fromDom });
+      } else if (looksLikeBrand(fromDom)) {
+        score += 3;
+        ev.push({ group: "XÁC THỰC", tone: "bad", text: "Domain người gửi nhái tên công ty nhưng không phải domain thật — dấu hiệu giả mạo điển hình.", anchor: fromDom });
+      } else {
+        score += 1;
+        ev.push({ group: "XÁC THỰC", tone: "warn", text: "Người gửi từ domain lạ, không thuộc công ty.", anchor: fromDom });
+      }
+    } else { missing.push("địa chỉ người gửi"); }
+
+    if (replyDom && fromDom && replyDom !== fromDom) {
+      score += 2;
+      ev.push({ group: "XÁC THỰC", tone: "bad", text: "Bấm Trả lời là thư đi sang một domain khác hẳn người gửi — thư của bạn rơi vào tay khác.", anchor: replyDom });
+    }
+    if (/it|support|security|nhân sự|kỹ thuật|bảo mật|helpdesk|hr/i.test(display) && fromDom && !isCompany(fromDom)) {
+      score += 2;
+      ev.push({ group: "NỘI DUNG", tone: "bad", text: "Tự xưng là bộ phận nội bộ nhưng lại gửi từ domain ngoài công ty.", anchor: display.split("<")[0].trim() || display });
+    }
+
+    /* ---- social engineering ---- */
+    var urgentHit = t.match(/(bị khoá trong \d+ phút|ngay lập tức|trong 30 phút|KHẨN|gấp|hết hạn)/i);
+    var credHit   = t.match(/(xác minh|đăng nhập|mật khẩu|cập nhật lại thông tin tài khoản)/i);
+    if (urgentHit) { score += 2; ev.push({ group: "NỘI DUNG", tone: "bad", text: "Đặt hạn chót gấp để bạn không kịp kiểm tra lại — thủ đoạn tạo áp lực thời gian.", anchor: urgentHit[0] }); }
+    if (credHit)   { score += 2; ev.push({ group: "NỘI DUNG", tone: "bad", text: "Yêu cầu đăng nhập / cung cấp thông tin tài khoản.", anchor: credHit[0] }); }
+    if (!urgentHit && !credHit && hasHeaders)
+      ev.push({ group: "NỘI DUNG", tone: "good", text: "Không thấy ngôn ngữ hối thúc hay đòi thông tin đăng nhập.", anchor: null });
+
+    /* ---- links ---- */
+    if (urls.length) {
+      urls.forEach(function (u) {
+        var h = hostOf(u), kws = pushyKw(u);
+        if (looksLikeBrand(h)) {
+          score += 3; ev.push({ group: "LIÊN KẾT", tone: "bad", text: "Liên kết dẫn tới domain nhái thương hiệu nội bộ, không phải cổng thật của công ty.", anchor: u });
+        } else if (/^\d+\.\d+\.\d+\.\d+/.test(h)) {
+          score += 3; ev.push({ group: "LIÊN KẾT", tone: "bad", text: "Liên kết trỏ thẳng vào một địa chỉ IP thay vì tên miền — gần như luôn là trang lừa.", anchor: u });
+        } else if (riskyExt(h) && kws.length) {
+          score += 3; ev.push({ group: "LIÊN KẾT", tone: "bad", text: "Tên miền dùng đuôi rẻ tiền hay bị lợi dụng, lại kèm từ khoá thúc ép đăng nhập.", anchor: u });
+        } else if (isCompany(h)) {
+          ev.push({ group: "LIÊN KẾT", tone: "good", text: "Liên kết trỏ về đúng cổng chính thức của công ty.", anchor: u });
+        } else if (isTrusted(h)) {
+          ev.push({ group: "LIÊN KẾT", tone: "good", text: "Liên kết tới dịch vụ ngoài đã nằm trong danh sách tin cậy.", anchor: u });
+        } else {
+          score += kws.length || riskyExt(h) ? 2 : 1;
+          ev.push({ group: "LIÊN KẾT", tone: "warn", text: "Domain lạ, chưa nằm trong danh sách kiểm chứng — cần xác minh trước khi bấm.", anchor: u });
+        }
+      });
+    } else { ev.push({ group: "LIÊN KẾT", tone: "info", text: "Email không chứa liên kết nào.", anchor: null }); }
+
+    /* ---- verdict + pessimistic-safety guardrail ---- */
+    var thin = !hasHeaders, verdict, word, headline, confidence, action;
+
+    if (thin && score < 6) {
+      verdict = "DOUBT"; word = "Nghi vấn";
+      headline = "Có dấu hiệu đáng ngờ, nhưng thiếu header nên chưa kết luận chắc được.";
+      confidence = "THẤP";
+      action = {
+        title: "Việc nên làm",
+        body: "Chưa bấm gì cả. Lấy thêm <b>header đầy đủ</b> rồi soi lại — có header thì PhishShield mới đối chiếu được người gửi thật.",
+        offer: "headers"
+      };
+    } else if (score >= 6) {
+      verdict = "DANGER"; word = "Nguy hiểm";
+      headline = "Đừng bấm liên kết nào trong email này.";
+      confidence = (fromDom && (spf || dmarc)) ? "CAO" : "TRUNG BÌNH";
+      action = {
+        title: "Việc nên làm",
+        body: "Không bấm liên kết, không nhập thông tin. Báo phòng IT qua kênh chính thức rồi xoá email.<br>Nếu bạn <b>đã lỡ bấm và nhập mật khẩu</b> — đổi mật khẩu ngay bây giờ, rồi báo IT.",
+        offer: null
+      };
+    } else if (score >= 3) {
+      verdict = "DOUBT"; word = "Nghi vấn";
+      headline = "Xác minh người gửi qua kênh khác trước khi làm theo.";
+      confidence = (fromDom && (spf || dmarc)) ? "CAO" : "TRUNG BÌNH";
+      action = {
+        title: "Việc nên làm",
+        body: "Gọi cho người gửi bằng số nội bộ bạn đã biết — đừng gọi số ghi trong email. Chỉ làm theo sau khi họ xác nhận.",
+        offer: null
+      };
+    } else {
+      verdict = "SAFE"; word = "An toàn";
+      headline = "Không thấy dấu hiệu lừa đảo trong email này.";
+      confidence = (spf === "pass" && fromDom) ? "CAO" : "TRUNG BÌNH";
+      action = {
+        title: "Việc nên làm",
+        body: "Email có vẻ hợp lệ. Vẫn cẩn trọng nếu sau đó có ai hỏi mật khẩu hay mã OTP — PhishShield chỉ soi email này, không bảo chứng cho các bước sau.",
+        offer: null
+      };
+    }
+
+    return {
+      verdict: verdict, word: word, headline: headline,
+      score: Math.max(0, Math.min(100, Math.round(score / 14 * 100))),
+      confidence: confidence, missing: missing, evidence: ev, action: action
+    };
+  }
+
+  /* ==========================================================
+     5. Rendering
+     ========================================================== */
+  var $ = function (id) { return document.getElementById(id); };
+  var compose = $("compose"), doc = $("doc"), band = $("band"), statusEl = $("status");
+  var reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var BCLASS = { DANGER: "b-bad", DOUBT: "b-doubt", SAFE: "b-safe", UNKNOWN: "b-unknown" };
+
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  function renderDoc(raw, evidence) {
+    var ranges = [];
+    evidence.forEach(function (e, i) {
+      if (!e.anchor) return;
+      var at = raw.indexOf(e.anchor);
+      if (at === -1) return;
+      ranges.push({ s: at, e: at + e.anchor.length, n: i + 1, tone: e.tone });
+    });
+    ranges.sort(function (a, b) { return a.s - b.s; });
+    var keep = [], lastEnd = -1;
+    ranges.forEach(function (r) { if (r.s >= lastEnd) { keep.push(r); lastEnd = r.e; } });
+
+    var lines = [], pos = 0;
+    raw.split("\n").forEach(function (txt) {
+      lines.push({ txt: txt, s: pos, e: pos + txt.length });
+      pos += txt.length + 1;
+    });
+
+    var html = "";
+    lines.forEach(function (ln) {
+      var here = keep.filter(function (r) { return r.s < ln.e && r.e > ln.s; });
+      var gut = here.map(function (r) {
+        return '<button class="pin t-' + r.tone + '" data-n="' + r.n + '" type="button" ' +
+               'aria-label="Bằng chứng số ' + r.n + '">' + r.n + "</button>";
+      }).join("");
+
+      var body = "", cur = ln.s;
+      here.forEach(function (r) {
+        var s = Math.max(r.s, ln.s), e = Math.min(r.e, ln.e);
+        if (s > cur) body += esc(ln.txt.slice(cur - ln.s, s - ln.s));
+        body += '<mark class="hit t-' + r.tone + '" data-n="' + r.n + '">' +
+                esc(ln.txt.slice(s - ln.s, e - ln.s)) + "</mark>";
+        cur = e;
+      });
+      if (cur < ln.e) body += esc(ln.txt.slice(cur - ln.s));
+
+      html += '<div class="ln' + (ln.txt.trim() ? "" : " blank") + '">' +
+                '<div class="gut">' + gut + "</div>" +
+                '<div class="txt">' + (body || "&nbsp;") + "</div>" +
+              "</div>";
+    });
+    return html;
+  }
+
+  function renderEvidence(evidence) {
+    var order = ["XÁC THỰC", "NỘI DUNG", "LIÊN KẾT"], byGroup = {};
+    evidence.forEach(function (e, i) { (byGroup[e.group] = byGroup[e.group] || []).push({ e: e, n: i + 1 }); });
+
+    var html = "";
+    order.forEach(function (g) {
+      if (!byGroup[g]) return;
+      html += '<div class="evgroup"><h3>' + g + '</h3><ul class="evlist">';
+      byGroup[g].forEach(function (row) {
+        html += '<li><button class="ev t-' + row.e.tone + '" data-n="' + row.n + '" type="button">' +
+                  '<span class="k">' + row.n + "</span>" +
+                  "<span>" + row.e.text +
+                  (row.e.anchor ? "" : ' <span class="no-anchor">· không gắn dòng</span>') +
+                  "</span></button></li>";
+      });
+      html += "</ul></div>";
+    });
+    return html;
+  }
+
+  function linkPins() {
+    function set(n, on) {
+      document.querySelectorAll('[data-n="' + n + '"]').forEach(function (el) { el.classList.toggle("lit", on); });
+    }
+    document.querySelectorAll("[data-n]").forEach(function (el) {
+      var n = el.getAttribute("data-n");
+      el.addEventListener("mouseenter", function () { set(n, true); });
+      el.addEventListener("mouseleave", function () { set(n, false); });
+      el.addEventListener("focus", function () { set(n, true); });
+      el.addEventListener("blur", function () { set(n, false); });
+      if (el.tagName === "BUTTON") {
+        el.addEventListener("click", function () {
+          var target = el.classList.contains("pin")
+            ? document.querySelector('.ev[data-n="' + n + '"]')
+            : document.querySelector('.pin[data-n="' + n + '"]');
+          if (target) { target.focus(); target.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "center" }); }
+        });
+      }
+    });
+  }
+
+  function show(res, raw, animate) {
+    compose.classList.add("hidden");
+    $("compAct").classList.add("hidden");
+    doc.classList.remove("hidden");
+    doc.innerHTML = renderDoc(raw, res.evidence);
+    $("sheetTitle").textContent = "Email đã soi · " + raw.split("\n").length + " dòng";
+
+    band.className = "band " + BCLASS[res.verdict];
+    $("vWord").textContent = res.word;
+    $("vLine").textContent = res.headline;
+
+    var tags = '<span class="tag on">Độ tin cậy: ' + res.confidence + "</span>";
+    (res.missing || []).forEach(function (m) { tags += '<span class="tag">Thiếu: ' + m + "</span>"; });
+    $("vTags").innerHTML = tags;
+
+    var cells = 10, dialHTML = "";
+    if (res.score !== null) {
+      dialHTML = '<div class="num">' + res.score + '</div><div class="bars">';
+      for (var i = 0; i < cells; i++) dialHTML += "<i></i>";
+      dialHTML += '</div><div class="cap">Điểm rủi ro</div>';
+    } else {
+      dialHTML = '<div class="num">—</div><div class="cap">Chưa chấm điểm</div>';
+    }
+    $("dial").innerHTML = dialHTML;
+    if (res.score !== null) {
+      var fill = Math.round(res.score / 100 * cells);
+      requestAnimationFrame(function () {
+        $("dial").querySelectorAll(".bars i").forEach(function (c, idx) { if (idx < fill) c.classList.add("f"); });
+      });
+    }
+
+    $("evCount").textContent = res.evidence.length + " mục";
+    $("evidence").innerHTML = renderEvidence(res.evidence);
+
+    var act = $("action");
+    act.className = "act " + BCLASS[res.verdict];
+    var h = "<h3>" + res.action.title + "</h3><p>" + res.action.body + '</p><div class="row">';
+    if (res.action.offer === "headers")
+      h += '<button class="btn pencil" id="fixBtn" type="button">Dán header đầy đủ &amp; soi lại</button>';
+    if (res.verdict !== "SAFE" && res.verdict !== "UNKNOWN")
+      h += '<button class="btn key" id="reportBtn" type="button">Báo phòng IT</button>';
+    h += '<button class="btn" id="againBtn" type="button">Soi email khác</button></div>';
+    act.innerHTML = h;
+
+    $("limits").innerHTML =
+      "<b>Giới hạn.</b> PhishShield chỉ đọc nội dung bạn dán vào — không mở liên kết, không tải tệp đính kèm, " +
+      "không tự thao tác thay bạn. Domain lạ không có nghĩa là xấu, chỉ là <b>chưa kiểm chứng được</b>.";
+
+    band.classList.remove("hidden");
+    linkPins();
+    wireResultButtons();
+
+    var marks = Array.prototype.slice.call(doc.querySelectorAll(".pin, mark.hit"));
+    if (animate && !reduce && marks.length) {
+      doc.classList.add("revealing");
+      marks.forEach(function (el, i) { setTimeout(function () { el.classList.add("seen"); }, 140 + i * 55); });
+      setTimeout(function () { doc.classList.remove("revealing"); }, 200 + marks.length * 55 + 300);
+    }
+
+    statusEl.textContent = res.evidence.length + " bằng chứng · độ tin cậy " + res.confidence;
+  }
+
+  function toCompose() {
+    band.classList.add("hidden");
+    doc.classList.add("hidden");
+    doc.innerHTML = "";
+    compose.classList.remove("hidden");
+    $("compAct").classList.remove("hidden");
+    $("evidence").innerHTML = "";
+    $("action").innerHTML = "";
+    $("limits").innerHTML = "";
+    $("evCount").textContent = "";
+    $("sheetTitle").textContent = "Nội dung email";
+    statusEl.textContent = "Sẵn sàng — dán email cần soi";
+    document.querySelectorAll(".chip").forEach(function (c) { c.setAttribute("aria-pressed", "false"); });
+  }
+
+  function run(raw, animate) {
+    var text = String(raw != null ? raw : compose.value).trim();
+    if (!text) { compose.focus(); toast("Dán nội dung email vào đã nhé."); return; }
+    compose.value = text;
+    show(analyze(text), text, animate !== false);
+  }
+
+  function wireResultButtons() {
+    var again = $("againBtn"); if (again) again.addEventListener("click", function () { toCompose(); compose.focus(); });
+    var report = $("reportBtn");
+    if (report) report.addEventListener("click", function () { toast("Đã tạo báo cáo gửi phòng IT (mô phỏng)."); });
+    var fix = $("fixBtn");
+    if (fix) fix.addEventListener("click", function () {
+      run(CORRECTED);
+      toast("Đã soi lại với header đầy đủ — độ tin cậy tăng lên.");
+    });
+  }
+
+  /* ---- chips: switch sample AND analyze, so the demo never lands on a blank ---- */
+  var chips = $("chips");
+  SAMPLES.forEach(function (s, i) {
+    var b = document.createElement("button");
+    b.className = "chip"; b.type = "button"; b.textContent = s.label;
+    b.setAttribute("aria-pressed", i === 0 ? "true" : "false");
+    b.addEventListener("click", function () {
+      document.querySelectorAll(".chip").forEach(function (c) { c.setAttribute("aria-pressed", "false"); });
+      b.setAttribute("aria-pressed", "true");
+      run(s.text);
+    });
+    chips.appendChild(b);
+  });
+
+  $("runBtn").addEventListener("click", function () { run(); });
+  $("clearBtn").addEventListener("click", function () { compose.value = ""; toCompose(); compose.focus(); });
+  compose.addEventListener("keydown", function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") run();
+  });
+
+  var toastTimer;
+  function toast(msg) {
+    var el = $("toast"); el.textContent = msg; el.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove("show"); }, 3000);
+  }
+
+  /* ---- open already examined: the thesis is the first thing you see ---- */
+  run(SAMPLES[0].text);
+})();
+</script>
