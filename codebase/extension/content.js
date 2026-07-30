@@ -44,6 +44,8 @@
   .ps-tier{border:1px solid #dbe1ea;background:#fff;border-radius:3px;padding:3px 8px;font-weight:700}
   .ps-tier.local{color:#0a6a3e;border-color:#a6d9bd}
   .ps-tier.cloud{color:#1f34c4;border-color:#1f34c4}
+  .ps-cached{border:1px solid #a6d9bd;background:#e4f5eb;color:#0a6a3e;border-radius:3px;
+    padding:3px 8px;font-weight:700}
   .ps-wait{margin-left:10px;font-family:ui-monospace,Consolas,monospace;font-size:11.5px;
     font-weight:600;color:#1f34c4;background:#e7eafb;border-radius:10px;padding:2px 9px;
     text-transform:none;letter-spacing:0;animation:ps-pulse 1.4s ease-in-out infinite}
@@ -124,6 +126,7 @@
       (items ? `<ul class="ps-ev">${items}</ul>` : "") +
       `<div class="ps-foot"><span class="ps-tier ${r.tier}">` +
       `${r.tier === "cloud" ? "CÓ GỌI AI" : "TẠI CHỖ"}</span>` +
+      (r.cached ? `<span class="ps-cached">đã lưu · không gọi lại API</span>` : "") +
       `<span>${esc(r.analysis_source || "")}</span>` +
       `<span style="margin-left:auto">Bạn là người quyết định cuối cùng.</span></div>`;
     return el;
@@ -147,14 +150,28 @@
     g.querySelector(".ps-safe-btn").focus();
   }
 
+  /* Bản sao rút gọn của bộ đệm trong background.js, CHỈ dùng cho đường chạy thử
+     (khi content script được nạp tay vào DevTools, không qua tiện ích thật).
+     background.js mới là bản chính — sửa hành vi thì sửa ở đó trước. */
+  const devCache = new Map();
+  const DEV_TTL = 15 * 60 * 1000;
+
   async function ask(text, path) {
     if (!IS_EXT) {
+      if (path === "/analyze") {
+        const hit = devCache.get(text);
+        if (hit && Date.now() - hit.at < DEV_TTL) {
+          return { ok: true, data: { ...hit.data, cached: true } };
+        }
+      }
       const res = await fetch("http://127.0.0.1:8777" + path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
       });
-      return { ok: res.ok, data: await res.json() };
+      const data = await res.json();
+      if (path === "/analyze" && res.ok) devCache.set(text, { data, at: Date.now() });
+      return { ok: res.ok, data: { ...data, cached: false } };
     }
     return chrome.runtime.sendMessage({ type: "PS_ANALYZE", text, path });
   }
@@ -227,6 +244,15 @@
     paint(first, t, !!first.pending_llm);
 
     if (!first.pending_llm) return; // tầng 1 đã kết luận — xong
+
+    /* Chờ một nhịp trước khi gọi AI.
+
+       Người dùng lướt hộp thư sẽ mở qua hàng loạt thư trong vài trăm mili giây.
+       Nếu gọi ngay, mỗi cái liếc qua là một lần trả tiền — bộ chặn theo
+       "thế hệ" chỉ bỏ KẾT QUẢ về muộn, chứ tiền thì đã tiêu rồi.
+       Đợi một nhịp ngắn: chỉ thư nào người dùng thật sự dừng lại mới tốn token. */
+    await new Promise((r) => setTimeout(r, 450));
+    if (!stillCurrent()) return;
 
     // Tầng 2: hỏi AI, rồi thay kết quả tạm bằng kết luận thật.
     let full;

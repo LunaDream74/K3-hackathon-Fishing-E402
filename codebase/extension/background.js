@@ -6,15 +6,57 @@
    kết quả về.
 
    Hiện tại service worker gọi bridge chạy tại localhost (codebase/bridge.py),
-   nơi engine v1 thật sự chạy. Khi nào chuyển sang gọi thẳng OpenAI thì đổi
+   nơi engine thật sự chạy. Khi nào chuyển sang gọi thẳng OpenAI thì đổi
    BRIDGE_URL thành endpoint thật và đặt key ở đây — KHÔNG bao giờ ở content.js.
    ============================================================================ */
 
 const BRIDGE_URL = "http://127.0.0.1:8777";
 
-async function analyze(text, path = "/analyze") {
-  // Chỉ cho phép đúng hai đường, không nhận path tuỳ ý từ content script.
-  const route = path === "/scan" ? "/scan" : "/analyze";
+/* ---------------------------------------------------------------------------
+   BỘ NHỚ ĐỆM — chỉ cho /analyze (đường TỐN TIỀN).
+
+   /scan chạy tại chỗ, ~150ms, không tốn gì → không cần đệm.
+   /analyze mới là đường gọi gpt-4o-mini. Mở lại đúng một email đã soi rồi thì
+   không có lý do gì phải trả tiền lần nữa.
+
+   Khoá là NGUYÊN VĂN đoạn text gửi đi, không phải threadId và cũng không phải
+   hash. Lý do:
+     - threadId sai: cùng một thread nhưng nội dung đổi (có thư mới) thì verdict
+       phải đổi theo.
+     - hash sai ở chỗ khác: đây là bộ đệm cho một quyết định BẢO MẬT. Một lần
+       đụng hash hiếm hoi cũng đủ trả nhầm "an toàn" cho một email lừa đảo.
+       Text nguyên văn thì không bao giờ đụng nhau.
+
+   Chặn cũ đi bằng hai lớp: giới hạn số mục và hạn dùng. Verdict cũ nguy hiểm
+   hơn là không có verdict — thà gọi lại còn hơn tin vào kết luận đã hết hạn.
+   Đổi engine thì TĂNG CACHE_EPOCH để bỏ sạch đệm cũ.
+   --------------------------------------------------------------------------- */
+const CACHE_EPOCH = 1;      // tăng số này mỗi khi engine đổi hành vi
+const CACHE_MAX = 50;       // đủ cho một phiên đọc thư, không phình bộ nhớ
+const CACHE_TTL_MS = 15 * 60 * 1000;
+
+const cache = new Map();    // text -> { data, at }
+
+function cacheGet(text) {
+  const hit = cache.get(text);
+  if (!hit) return null;
+  if (Date.now() - hit.at > CACHE_TTL_MS) {
+    cache.delete(text);
+    return null;
+  }
+  // Đọc lại thì đẩy lên cuối — Map giữ thứ tự chèn, nên mục cũ nhất bị loại trước.
+  cache.delete(text);
+  cache.set(text, hit);
+  return hit.data;
+}
+
+function cacheSet(text, data) {
+  cache.delete(text);
+  cache.set(text, { data, at: Date.now() });
+  while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
+}
+
+async function callBridge(text, route) {
   const res = await fetch(`${BRIDGE_URL}${route}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -24,7 +66,26 @@ async function analyze(text, path = "/analyze") {
   return res.json();
 }
 
+async function analyze(text, path = "/analyze") {
+  // Chỉ cho phép đúng hai đường, không nhận path tuỳ ý từ content script.
+  const route = path === "/scan" ? "/scan" : "/analyze";
+
+  if (route === "/scan") return callBridge(text, route);
+
+  const key = `${CACHE_EPOCH}|${text}`;
+  const hit = cacheGet(key);
+  if (hit) return { ...hit, cached: true };   // không tốn một token nào
+
+  const data = await callBridge(text, route);
+  cacheSet(key, data);
+  return { ...data, cached: false };
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg?.type === "PS_CACHE_STATS") {
+    sendResponse({ ok: true, data: { size: cache.size, max: CACHE_MAX } });
+    return false;
+  }
   if (msg?.type !== "PS_ANALYZE") return false;
 
   analyze(msg.text, msg.path)
