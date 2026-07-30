@@ -67,14 +67,24 @@ export function readThread() {
  * @returns {() => void} hàm huỷ theo dõi
  */
 export function onThreadChange(cb) {
-  let lastId = null;
+  // Theo dõi CHÍNH PHẦN TỬ, không phải threadId.
+  //
+  // So theo id thì mở lại đúng thư đang mở sẽ không kích hoạt gì cả — trong khi
+  // host đã dựng lại toàn bộ khung đọc, tức là chỗ chèn banner mới toanh và
+  // trống trơn. Kết quả: banner biến mất và không ai vẽ lại, người dùng tưởng
+  // tiện ích chết.
+  //
+  // Phần tử bị thay mới mỗi lần khung đọc dựng lại, nên so theo phần tử bắt được
+  // cả hai trường hợp: đổi sang thư khác, và mở lại cùng một thư.
+  // mountBanner() chỉ thay con bên trong, không đụng tới phần tử gốc, nên không
+  // tự kích hoạt lại chính mình.
+  let lastRoot = null;
 
   const tick = () => {
-    const t = readThread();
-    const id = t?.threadId ?? null;
-    if (id !== lastId) {
-      lastId = id;
-      if (t) cb(t);
+    const root = document.querySelector("[data-ps-thread]");
+    if (root !== lastRoot) {
+      lastRoot = root;
+      if (root) cb(readThread());
     }
   };
 

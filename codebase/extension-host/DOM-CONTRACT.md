@@ -79,7 +79,17 @@ export function mountBanner(el): boolean;
 bấm sang thư khác **thay DOM tại chỗ**, không có `page load` nào cả.
 
 Hệ quả: đọc DOM một lần lúc khởi động là sai — tiện ích sẽ đứng im ở thư đầu
-tiên. Phải theo dõi bằng `MutationObserver` và so `threadId` (xem `mock.js`).
+tiên. Phải theo dõi bằng `MutationObserver`.
+
+⚠️ **So theo PHẦN TỬ, đừng so theo `threadId`.** Đây là lỗi đã thực sự xảy ra:
+mở lại đúng thư đang mở thì `threadId` không đổi, nên adapter không báo gì —
+trong khi host đã dựng lại toàn bộ khung đọc, tức là chỗ chèn banner mới toanh
+và **trống**. Banner biến mất, không ai vẽ lại, người dùng tưởng tiện ích chết.
+
+Phần tử `[data-ps-thread]` bị thay mới mỗi lần khung đọc dựng lại, nên so theo
+phần tử bắt được cả hai trường hợp: đổi thư, và mở lại cùng một thư.
+`mountBanner()` chỉ thay con bên trong nên không tự kích hoạt lại chính nó.
+Xem bản hiện thực trong `codebase/extension/adapters/mock.js`.
 
 Viết adapter cho hộp thư giả lập này mà chạy đúng thì sang Gmail gần như
 không phải sửa logic, vì bài toán y hệt.

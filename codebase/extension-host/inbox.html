@@ -328,6 +328,7 @@
   };
   var qIndex = { danger: 0, doubt: 0, safe: 0 };
   var newCount = 0;
+  var currentId = null;   // thư đang mở, để vẽ lại danh sách mà không mất highlight
 
   var listEl = document.getElementById("list");
   var readEl = document.getElementById("read");
@@ -383,17 +384,16 @@
       MAIL.unshift(mail);
 
       document.getElementById("incoming").classList.add("hidden");
-      drawList(null);
 
-      // để khán giả kịp thấy thư rơi vào hộp thư trước khi nó mở ra
+      // Thư đến thì nằm CHƯA ĐỌC ở đầu danh sách, KHÔNG tự mở.
+      // Thư thật cũng không tự bật ra, và quan trọng hơn: người trình bày cần
+      // giữ nhịp — "có thư mới này, mình mở thử xem" — chứ không để máy mở hộ
+      // rồi chạy phân tích trước cả khi khán giả kịp nhìn.
+      drawList(currentId);
+
       setTimeout(function () {
-        openMail(mail.id);
-        mail.fresh = false;
-        // Chỉ mở khoá SAU KHI thư đã mở hẳn. Nếu mở khoá ngay lúc thư vừa rơi
-        // xuống, bấm nhanh hai lần sẽ có hai lượt giao chồng lên nhau và thư mở
-        // ra không khớp với nút vừa bấm — rất dễ vỡ trận ngay giữa buổi demo.
         btns.forEach(function (b) { b.disabled = false; });
-      }, 620);
+      }, 320);
     }, 780);
   }
 
@@ -403,6 +403,8 @@
     var m = MAIL.filter(function (x) { return x.id === id; })[0];
     if (!m) return;
     m.unread = false;
+    m.fresh = false;      // bỏ nhãn MỚI khi người dùng đã mở
+    currentId = id;
 
     readEl.innerHTML =
       '<article data-ps-thread data-ps-thread-id="' + esc(m.id) + '">' +
