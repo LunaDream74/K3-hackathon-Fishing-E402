@@ -44,6 +44,40 @@
   }
   .top .me { width: 32px; height: 32px; border-radius: 50%; background: var(--app-3); display: grid; place-items: center; font-weight: 700; font-size: 13px; color: var(--ink-2); }
 
+  /* Giả lập máy chủ đẩy thư mới về. Đây là hành vi của ứng dụng thư, KHÔNG phải
+     của PhishShield — trang này vẫn không chứa dòng nào của tiện ích.
+     Dùng khi demo: để khán giả chọn loại thư sắp đến, rồi xem tiện ích tự phản ứng. */
+  .deliver { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .deliver .lbl { font-family: var(--mono); font-size: 11px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--ink-3); }
+  .deliver button {
+    font-family: var(--mono); font-size: 12px; font-weight: 600; padding: 5px 10px;
+    border: 1px solid var(--rule); background: var(--app); color: var(--ink-2);
+    border-radius: 3px; cursor: pointer; transition: .14s;
+  }
+  .deliver button:hover { border-color: var(--sel-ink); color: var(--sel-ink); background: var(--sel); }
+  .deliver button:focus-visible { outline: 2px solid var(--sel-ink); outline-offset: 2px; }
+  .deliver button:disabled { opacity: .45; cursor: default; }
+  .deliver .k-safe:hover   { border-color: #0a6a3e; color: #0a6a3e; background: #e4f5eb; }
+  .deliver .k-doubt:hover  { border-color: #835500; color: #835500; background: #fcf3de; }
+  .deliver .k-danger:hover { border-color: #bf0f1d; color: #bf0f1d; background: #fdecec; }
+
+  .incoming {
+    font-family: var(--mono); font-size: 12px; color: var(--sel-ink);
+    display: inline-flex; align-items: center; gap: 7px;
+  }
+  .incoming .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--sel-ink);
+    animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+
+  .row.fresh { animation: land .5s ease; }
+  @keyframes land { from { background: var(--sel); transform: translateY(-6px); } to { background: transparent; transform: none; } }
+  .row .new-tag { font-family: var(--mono); font-size: 9.5px; font-weight: 700; letter-spacing: .06em;
+    color: #fff; background: var(--sel-ink); border-radius: 8px; padding: 1px 6px; margin-left: 6px; }
+  @media (prefers-reduced-motion: reduce) {
+    .row.fresh { animation: none; } .incoming .dot { animation: none; }
+  }
+
   .wrap { display: grid; grid-template-columns: 176px 300px minmax(0, 1fr); min-height: calc(100vh - 53px); }
   @media (max-width: 1000px) { .wrap { grid-template-columns: 1fr; } .nav, .list { display: none; } }
 
@@ -91,6 +125,8 @@
   .replybar { margin-top: 26px; display: flex; gap: 9px; }
   .replybar button { border: 1px solid var(--rule); background: var(--app); border-radius: 18px; padding: 8px 18px; font-size: 14px; color: var(--ink-2); }
 
+  .hidden { display: none !important; }
+
   .devnote {
     margin: 26px 0 0; border-top: 1px dashed var(--rule); padding-top: 12px;
     font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); line-height: 1.7;
@@ -104,6 +140,14 @@
 <div class="top">
   <span class="logo">Thư</span>
   <div class="search">Tìm trong thư</div>
+  <div class="deliver" id="deliver">
+    <span class="lbl">Thư mới đến</span>
+    <button type="button" class="k-safe"   data-kind="safe">An toàn</button>
+    <button type="button" class="k-doubt"  data-kind="doubt">Nghi vấn</button>
+    <button type="button" class="k-danger" data-kind="danger">Nguy hiểm</button>
+    <button type="button" data-kind="any">Bất kỳ</button>
+    <span class="incoming hidden" id="incoming"><span class="dot"></span>đang đến…</span>
+  </div>
   <div class="me">MT</div>
 </div>
 
@@ -215,6 +259,76 @@
     }
   ];
 
+  /* ---------------------------------------------------------------------
+     HÀNG ĐỢI THƯ ĐẾN — dùng khi demo.
+
+     Khán giả chọn loại thư sắp đến, thư đó "bay về" hộp thư và tiện ích tự
+     phân tích. Chọn cách này thay vì để khán giả tự gõ email, vì whitelist của
+     sản phẩm là dữ liệu hư cấu (vinai.io, vlearn.vn…) — mọi email thật do khán
+     giả gõ đều rơi vào "tên miền lạ" và chỉ ra được màu vàng, không bao giờ
+     chạm tới đỏ hay xanh. Hàng đợi thì diễn được cả ba mức.
+
+     MỌI thư dưới đây đã được chạy thật qua engine v2 và trả về ĐÚNG mức đã gán:
+       danger -> DANGER (tầng luật, ~96 điểm)
+       doubt  -> DOUBT  (tầng LLM,  ~65 điểm)
+       safe   -> SAFE   (tầng luật, ~2 điểm)
+     Sửa nội dung thì phải chạy lại để kiểm chứng, đừng đoán.
+     --------------------------------------------------------------------- */
+  var QUEUE = {
+    danger: [
+      { name: "Giao Hàng Nhanh", initials: "GH", addr: "no-reply@giao-hang-nhanh24.tk",
+        subject: "Đơn hàng #GH8842 đang bị giữ tại kho",
+        snippet: "Đơn hàng của bạn đang bị giữ do thiếu phí vận chuyển…",
+        body: "<p>Kính gửi khách hàng,</p><p>Đơn hàng <b>#GH8842</b> đang bị giữ tại kho do thiếu phí vận chuyển. " +
+              "Vui lòng xác nhận trong vòng 24 giờ, nếu không đơn sẽ bị huỷ.</p>" +
+              '<p>Xác nhận tại: <a href="https://giao-hang-nhanh24.tk/verify-account">https://giao-hang-nhanh24.tk/verify-account</a></p>' +
+              "<p>Bộ phận Giao vận</p>" },
+      { name: "Chương trình tri ân", initials: "TA", addr: "event@qua-tang-vinai.xyz",
+        subject: "Bạn nhận được phần quà tri ân 2.000.000đ",
+        snippet: "Chúc mừng! Tài khoản của bạn được chọn nhận quà tri ân…",
+        body: "<p>Chúc mừng bạn!</p><p>Tài khoản của bạn nằm trong danh sách nhận quà tri ân trị giá " +
+              "<b>2.000.000đ</b>. Phần quà hết hạn sau 12 giờ.</p>" +
+              '<p>Bấm nhận quà: <a href="https://qua-tang-vinai.xyz/bonus-claim">https://qua-tang-vinai.xyz/bonus-claim</a></p>' },
+      { name: "Phòng Kế toán", initials: "KT", addr: "billing@thanh-toan-hoadon.top",
+        subject: "Hoá đơn tháng 7 chưa thanh toán",
+        snippet: "Hoá đơn của quý khách đã quá hạn thanh toán…",
+        body: "<p>Kính gửi Quý khách,</p><p>Hoá đơn tháng 7 đã <b>quá hạn thanh toán</b>. " +
+              "Đề nghị thanh toán ngay để tránh gián đoạn dịch vụ.</p>" +
+              '<p>Thanh toán tại: <a href="https://thanh-toan-hoadon.top/login-secure">https://thanh-toan-hoadon.top/login-secure</a></p>' }
+    ],
+    doubt: [
+      { name: "Trần Quốc Bảo", initials: "TB", addr: "bao.tran@doitac-thietke.com",
+        subject: "Tài liệu hợp tác quý 3",
+        snippet: "Chào anh, gửi anh bản tài liệu hợp tác quý 3…",
+        body: "<p>Chào anh,</p><p>Em gửi anh bản tài liệu hợp tác quý 3 để anh xem trước buổi họp.</p>" +
+              '<p><a href="https://doitac-thietke.com/tai-lieu-q3">https://doitac-thietke.com/tai-lieu-q3</a></p>' +
+              "<p>Cảm ơn anh.</p>" },
+      { name: "HR Connect", initials: "HC", addr: "info@tuyendung-online.net",
+        subject: "Cơ hội việc làm phù hợp với bạn",
+        snippet: "Bên mình có một vị trí phù hợp với hồ sơ của bạn…",
+        body: "<p>Chào bạn,</p><p>Bên mình có một vị trí phù hợp với hồ sơ của bạn.</p>" +
+              '<p>Mô tả công việc: <a href="https://tuyendung-online.net/vi-tri/1204">https://tuyendung-online.net/vi-tri/1204</a></p>' +
+              "<p>Trân trọng.</p>" }
+    ],
+    safe: [
+      { name: "VLearn", initials: "VL", addr: "no-reply@vlearn.vn",
+        subject: "Bài học mới đã mở",
+        snippet: "Bài 05 đã được mở, bạn vào học khi tiện nhé…",
+        body: "<p>Chào bạn,</p><p>Bài <b>05</b> đã được mở trong khoá học của bạn.</p>" +
+              '<p>Vào học tại: <a href="https://vlearn.vn/lesson-05">https://vlearn.vn/lesson-05</a></p>' +
+              "<p>Chúc bạn học tốt.</p>" },
+      { name: "Truyền thông nội bộ", initials: "TT", addr: "no-reply@vinai.io",
+        subject: "Lịch nghỉ lễ Quốc khánh",
+        snippet: "Thông báo lịch nghỉ lễ Quốc khánh của công ty…",
+        body: "<p>Chào các anh chị,</p><p>Công ty thông báo lịch nghỉ lễ Quốc khánh. " +
+              "Anh chị sắp xếp công việc phù hợp.</p>" +
+              '<p>Chi tiết: <a href="https://vingroup.net/thong-bao/nghi-le">https://vingroup.net/thong-bao/nghi-le</a></p>' +
+              "<p>Phòng Truyền thông</p>" }
+    ]
+  };
+  var qIndex = { danger: 0, doubt: 0, safe: 0 };
+  var newCount = 0;
+
   var listEl = document.getElementById("list");
   var readEl = document.getElementById("read");
 
@@ -226,14 +340,61 @@
 
   function drawList(activeId) {
     listEl.innerHTML = MAIL.map(function (m) {
-      return '<button class="row' + (m.unread ? " unread" : "") + '" role="listitem" type="button" ' +
+      return '<button class="row' + (m.unread ? " unread" : "") + (m.fresh ? " fresh" : "") +
+             '" role="listitem" type="button" ' +
              'data-open="' + m.id + '" aria-current="' + (m.id === activeId) + '">' +
-               '<div class="l1"><span class="who">' + esc(m.name) + "</span>" +
+               '<div class="l1"><span class="who">' + esc(m.name) +
+               (m.fresh ? '<span class="new-tag">MỚI</span>' : "") + "</span>" +
                '<span class="t">' + esc(m.time) + "</span></div>" +
                '<div class="sub">' + esc(m.subject) + "</div>" +
                '<div class="snip">' + esc(m.snippet) + "</div>" +
              "</button>";
     }).join("");
+  }
+
+  /* Thư mới "bay về": xuất hiện ở đầu danh sách rồi tự mở, để tiện ích phản ứng
+     ngay trước mắt khán giả. Vì mở thư KHÔNG tải lại trang, đây cũng chính là
+     đường mà MutationObserver của adapter phải bắt được. */
+  function deliver(kind) {
+    if (kind === "any") {
+      var kinds = ["safe", "doubt", "danger"];
+      kind = kinds[Math.floor(Math.random() * kinds.length)];
+    }
+    var pool = QUEUE[kind];
+    if (!pool || !pool.length) return;
+
+    var tpl = pool[qIndex[kind] % pool.length];
+    qIndex[kind]++;
+
+    var btns = document.querySelectorAll("#deliver button");
+    btns.forEach(function (b) { b.disabled = true; });
+    document.getElementById("incoming").classList.remove("hidden");
+
+    setTimeout(function () {
+      newCount++;
+      var mail = {
+        id: "t-new-" + newCount,
+        unread: true, fresh: true, time: "Vừa xong",
+        name: tpl.name, initials: tpl.initials, addr: tpl.addr,
+        subject: tpl.subject, snippet: tpl.snippet,
+        raw: "From: " + tpl.name + " <" + tpl.addr + ">\nSubject: " + tpl.subject,
+        body: tpl.body
+      };
+      MAIL.unshift(mail);
+
+      document.getElementById("incoming").classList.add("hidden");
+      drawList(null);
+
+      // để khán giả kịp thấy thư rơi vào hộp thư trước khi nó mở ra
+      setTimeout(function () {
+        openMail(mail.id);
+        mail.fresh = false;
+        // Chỉ mở khoá SAU KHI thư đã mở hẳn. Nếu mở khoá ngay lúc thư vừa rơi
+        // xuống, bấm nhanh hai lần sẽ có hai lượt giao chồng lên nhau và thư mở
+        // ra không khớp với nút vừa bấm — rất dễ vỡ trận ngay giữa buổi demo.
+        btns.forEach(function (b) { b.disabled = false; });
+      }, 620);
+    }, 780);
   }
 
   /* Mở thư = thay mới toàn bộ khung đọc. KHÔNG tải lại trang.
@@ -281,6 +442,11 @@
   listEl.addEventListener("click", function (e) {
     var btn = e.target.closest("[data-open]");
     if (btn) openMail(btn.getAttribute("data-open"));
+  });
+
+  document.getElementById("deliver").addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-kind]");
+    if (btn && !btn.disabled) deliver(btn.getAttribute("data-kind"));
   });
 
   drawList(MAIL[0].id);
