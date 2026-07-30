@@ -1,0 +1,23 @@
+{
+  "_comment": "Grounding data (Truth Source, hard-spot layer 1). The AI must NOT assume a domain is legitimate unless it is listed here. This simulates one company's known-good directory.",
+  "company_name": "Acme Corp",
+  "legitimate_domains": [
+    "acme-corp.com",
+    "acmecorp.com",
+    "mail.acme-corp.com"
+  ],
+  "it_sender_addresses": [
+    "it-support@acme-corp.com",
+    "security@acme-corp.com",
+    "no-reply@acme-corp.com"
+  ],
+  "official_portals": [
+    "https://sso.acme-corp.com",
+    "https://portal.acme-corp.com"
+  ],
+  "known_bad_domains": [
+    "acme-corp-security.com",
+    "acme-verify.com",
+    "acmecorp-support.net"
+  ]
+}

@@ -1,7 +1,4 @@
-google-genai>=0.1.0
-openai>=1.0.0
-streamlit>=1.30.0
-pydantic>=2.0.0
-python-dotenv>=1.0.0
-pyyaml>=6.0
-pandas>=2.0.0
+# PhishShield AI — MVP dependencies (kept minimal on purpose)
+openai>=1.40.0          # the one real AI call (Step 2+3 reasoning)
+python-dotenv>=1.0.0    # load OPENAI_API_KEY from codebase/.env
+streamlit>=1.30.0       # demo UI (optional; the CLI works without it)
