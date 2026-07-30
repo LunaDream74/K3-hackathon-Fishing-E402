@@ -70,23 +70,32 @@
     document.head.appendChild(s);
   }
 
-  const LEVEL = { DANGER: "ps-bad", DOUBT: "ps-warn", SAFE: "ps-good", UNKNOWN: "ps-unk" };
-  const WORD = { DANGER: "Nguy hiểm", DOUBT: "Nghi vấn", SAFE: "An toàn", UNKNOWN: "Chưa kết luận" };
-  const LAMP = { DANGER: "!", DOUBT: "?", SAFE: "✓", UNKNOWN: "–" };
+  /* Đúng ba phán quyết, mỗi phán quyết luôn đi kèm ĐỘ TIN CẬY.
+     PhishShield đưa bằng chứng và mức tin cậy — quyết định cuối cùng là của người dùng.
+     Không có trạng thái thứ tư: mọi ca không kết luận được đều là NGHI VẤN
+     với độ tin cậy THẤP, không bao giờ là AN TOÀN. */
+  const LEVEL = { DANGER: "ps-bad", DOUBT: "ps-warn", SAFE: "ps-good" };
+  const WORD = { DANGER: "Nguy hiểm", DOUBT: "Nghi vấn", SAFE: "An toàn" };
+  const LAMP = { DANGER: "!", DOUBT: "?", SAFE: "✓" };
+  const norm = (v) => (v in WORD ? v : "DOUBT");
 
   const esc = (s) =>
     String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
   function buildBanner(r) {
-    // Im lặng khi an toàn: một dòng mảnh, không phải banner.
-    if (r.verdict === "SAFE") {
+    const v = norm(r.verdict);
+    const conf = esc(r.confidence || "?");
+
+    // An toàn = không làm gì cả: một dòng mảnh, không phải banner.
+    // Vẫn nói độ tin cậy, để người dùng biết nên tin kết luận này đến đâu.
+    if (v === "SAFE") {
       const q = document.createElement("div");
       q.className = "ps-quiet";
       q.innerHTML =
         `<span style="color:#0a6a3e;font-weight:700">✓</span>` +
         `<span>PhishShield không thấy dấu hiệu bất thường trong thư này.</span>` +
         `<span style="margin-left:auto;font-family:ui-monospace,monospace;font-size:11.5px;color:#0a6a3e">` +
-        `${r.tier === "cloud" ? "Đã hỏi AI" : "Kiểm tra tại chỗ"}</span>`;
+        `độ tin cậy: ${conf} · ${r.tier === "cloud" ? "đã hỏi AI" : "tại chỗ"}</span>`;
       return q;
     }
 
@@ -97,16 +106,16 @@
       .join("");
 
     const el = document.createElement("div");
-    el.className = `ps-ban ${LEVEL[r.verdict] || "ps-unk"}`;
+    el.className = `ps-ban ${LEVEL[v]}`;
     el.innerHTML =
-      `<div class="ps-top"><span class="ps-lamp">${LAMP[r.verdict] || "–"}</span>` +
-      `<div><div class="ps-word">${WORD[r.verdict] || "—"}</div>` +
+      `<div class="ps-top"><span class="ps-lamp">${LAMP[v]}</span>` +
+      `<div><div class="ps-word">${WORD[v]} · độ tin cậy ${conf}</div>` +
       `<div class="ps-say">${esc(r.recommendation || "")}</div></div></div>` +
       (items ? `<ul class="ps-ev">${items}</ul>` : "") +
       `<div class="ps-foot"><span class="ps-tier ${r.tier}">` +
       `${r.tier === "cloud" ? "CÓ GỌI AI" : "TẠI CHỖ"}</span>` +
       `<span>${esc(r.analysis_source || "")}</span>` +
-      `<span style="margin-left:auto">độ tin cậy: ${esc(r.confidence || "?")}</span></div>`;
+      `<span style="margin-left:auto">Bạn là người quyết định cuối cùng.</span></div>`;
     return el;
   }
 
@@ -178,7 +187,7 @@
     const r = reply?.ok
       ? reply.data
       : {
-          verdict: "UNKNOWN", tier: "local", confidence: "THẤP", evidence: [],
+          verdict: "DOUBT", tier: "local", confidence: "THẤP", evidence: [],
           recommendation: "Không kết nối được engine PhishShield. Chưa kiểm tra được thư này — " +
                           "đừng bấm liên kết cho tới khi kiểm tra lại.",
           analysis_source: "BRIDGE UNAVAILABLE: " + (reply?.error || "unknown"),

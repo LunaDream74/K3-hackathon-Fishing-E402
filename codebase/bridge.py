@@ -48,14 +48,19 @@ def _get_agent():
     return _agent
 
 
-# v1 trả SAFE / WARNING / DANGER. Giao diện dùng SAFE / DOUBT / DANGER / UNKNOWN.
+# Chỉ có ĐÚNG BA phán quyết. Người dùng là người ra quyết định cuối cùng, nên
+# sản phẩm chỉ nói "an toàn / nghi vấn / nguy hiểm" kèm ĐỘ TIN CẬY, không tự hành động.
+#
+# Mọi trường hợp không kết luận được (thiếu dữ liệu, engine lỗi, nhãn lạ) đều rơi vào
+# NGHI VẤN với độ tin cậy THẤP — không bao giờ được rơi xuống AN TOÀN. Đó là hard-spot ④.
 _VERDICT = {"SAFE": "SAFE", "WARNING": "DOUBT", "DANGER": "DANGER"}
 
 
 def _to_contract(raw: dict, tier: str) -> dict:
     """Dịch đầu ra của engine v1 sang hợp đồng giao diện tiện ích."""
     level = str(raw.get("risk_level", "")).upper()
-    verdict = _VERDICT.get(level, "UNKNOWN")
+    # Nhãn lạ -> NGHI VẤN, không phải AN TOÀN.
+    verdict = _VERDICT.get(level, "DOUBT")
     score = raw.get("risk_score")
 
     elements = raw.get("suspicious_elements") or []
@@ -97,12 +102,12 @@ def analyze(text: str) -> dict:
         return _to_contract(scan["deterministic_result"], tier="local")
 
     if not _HAS_KEY:
-        # Cần LLM nhưng không có key: nói thẳng là chưa kết luận được,
-        # tuyệt đối không hạ xuống "an toàn".
+        # Cần LLM nhưng không có key: NGHI VẤN + độ tin cậy THẤP.
+        # Tuyệt đối không hạ xuống "an toàn".
         return {
             "engine": "v1",
             "tier": "local",
-            "verdict": "UNKNOWN",
+            "verdict": "DOUBT",
             "risk_score": None,
             "confidence": "THẤP",
             "evidence": [{"tone": "info", "text": r} for a in scan.get("url_analyses", [])
