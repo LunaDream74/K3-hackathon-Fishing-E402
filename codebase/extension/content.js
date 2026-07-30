@@ -44,6 +44,11 @@
   .ps-tier{border:1px solid #dbe1ea;background:#fff;border-radius:3px;padding:3px 8px;font-weight:700}
   .ps-tier.local{color:#0a6a3e;border-color:#a6d9bd}
   .ps-tier.cloud{color:#1f34c4;border-color:#1f34c4}
+  .ps-wait{margin-left:10px;font-family:ui-monospace,Consolas,monospace;font-size:11.5px;
+    font-weight:600;color:#1f34c4;background:#e7eafb;border-radius:10px;padding:2px 9px;
+    text-transform:none;letter-spacing:0;animation:ps-pulse 1.4s ease-in-out infinite}
+  @keyframes ps-pulse{0%,100%{opacity:1}50%{opacity:.45}}
+  @media (prefers-reduced-motion: reduce){.ps-wait{animation:none}}
   .ps-quiet{display:flex;align-items:center;gap:9px;font-size:13px;color:#4b5566;padding:7px 11px;
     border-left:3px solid #0a6a3e;background:#f4f6f9;border-radius:0 4px 4px 0;margin:14px 0;
     font-family:"Segoe UI",system-ui,sans-serif}
@@ -82,9 +87,14 @@
   const esc = (s) =>
     String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-  function buildBanner(r) {
+  function buildBanner(r, pending) {
     const v = norm(r.verdict);
     const conf = esc(r.confidence || "?");
+    // Trong lúc chờ AI phải nói rõ đây chưa phải kết luận cuối — im lặng dễ bị
+    // hiểu nhầm thành "đã kiểm tra xong và không sao".
+    const wait = pending
+      ? `<span class="ps-wait">đang hỏi AI…</span>`
+      : "";
 
     // An toàn = không làm gì cả: một dòng mảnh, không phải banner.
     // Vẫn nói độ tin cậy, để người dùng biết nên tin kết luận này đến đâu.
@@ -109,7 +119,7 @@
     el.className = `ps-ban ${LEVEL[v]}`;
     el.innerHTML =
       `<div class="ps-top"><span class="ps-lamp">${LAMP[v]}</span>` +
-      `<div><div class="ps-word">${WORD[v]} · độ tin cậy ${conf}</div>` +
+      `<div><div class="ps-word">${WORD[v]} · độ tin cậy ${conf}${wait}</div>` +
       `<div class="ps-say">${esc(r.recommendation || "")}</div></div></div>` +
       (items ? `<ul class="ps-ev">${items}</ul>` : "") +
       `<div class="ps-foot"><span class="ps-tier ${r.tier}">` +
@@ -137,16 +147,16 @@
     g.querySelector(".ps-safe-btn").focus();
   }
 
-  async function ask(text) {
+  async function ask(text, path) {
     if (!IS_EXT) {
-      const res = await fetch("http://127.0.0.1:8777/analyze", {
+      const res = await fetch("http://127.0.0.1:8777" + path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
       });
       return { ok: res.ok, data: await res.json() };
     }
-    return chrome.runtime.sendMessage({ type: "PS_ANALYZE", text });
+    return chrome.runtime.sendMessage({ type: "PS_ANALYZE", text, path });
   }
 
   /* Engine v1 nhận MỘT chuỗi text và tự dò link bằng regex. Nếu ném nguyên
@@ -173,39 +183,62 @@
     return lines.join("\n") + "\n\n" + t.bodyText;
   }
 
+  /* Mỗi lần mở thư mới là một "thế hệ". Lời gọi LLM mất vài giây, nên nếu
+     người dùng bấm sang thư khác giữa chừng, kết quả của thư CŨ sẽ về sau và
+     đắp nhầm lên thư ĐANG mở — cảnh báo của thư này hiện trên thư kia.
+     Mọi kết quả trả về đều phải qua cửa này trước khi được vẽ. */
+  let generation = 0;
+
+  const OFFLINE = (err) => ({
+    verdict: "DOUBT", tier: "local", confidence: "THẤP", evidence: [],
+    recommendation: "Không kết nối được engine PhishShield. Chưa kiểm tra được thư này — " +
+                    "đừng bấm liên kết cho tới khi kiểm tra lại.",
+    analysis_source: "BRIDGE UNAVAILABLE: " + (err || "unknown"),
+  });
+
+  function paint(r, t, pending) {
+    A.mountBanner(buildBanner(r, pending));
+    if (r.verdict !== "DANGER") return;
+    for (const l of t.links) {
+      if (l.el.dataset.psGated) continue;
+      l.el.dataset.psGated = "1";
+      l.el.classList.add("ps-danger-link");
+      l.el.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        gate(l.href);
+      });
+    }
+  }
+
   async function onThread(t) {
+    const mine = ++generation;
+    const threadId = t.threadId;
+
+    // Còn đúng thư đã gửi đi hỏi không? Kiểm tra cả thế hệ lẫn id, vì DOM có
+    // thể đã bị thay mới hoàn toàn trong lúc chờ.
+    const stillCurrent = () =>
+      mine === generation && A.readThread()?.threadId === threadId;
+
     const text = composeForEngine(t);
 
-    let reply;
-    try {
-      reply = await ask(text);
-    } catch (err) {
-      reply = { ok: false, error: String(err) };
-    }
+    // Tầng 1: tức thì, chạy tại chỗ. Người dùng có câu trả lời ngay thay vì
+    // đọc thư trong im lặng suốt mấy giây chờ AI.
+    let quick;
+    try { quick = await ask(text, "/scan"); } catch (err) { quick = { ok: false, error: String(err) }; }
+    if (!stillCurrent()) return;
 
-    // Bridge hỏng thì nói thẳng, không được im lặng thành "an toàn".
-    const r = reply?.ok
-      ? reply.data
-      : {
-          verdict: "DOUBT", tier: "local", confidence: "THẤP", evidence: [],
-          recommendation: "Không kết nối được engine PhishShield. Chưa kiểm tra được thư này — " +
-                          "đừng bấm liên kết cho tới khi kiểm tra lại.",
-          analysis_source: "BRIDGE UNAVAILABLE: " + (reply?.error || "unknown"),
-        };
+    const first = quick?.ok ? quick.data : OFFLINE(quick?.error);
+    paint(first, t, !!first.pending_llm);
 
-    A.mountBanner(buildBanner(r));
+    if (!first.pending_llm) return; // tầng 1 đã kết luận — xong
 
-    // Đánh dấu liên kết nguy hiểm ngay trong thân thư + chặn tại cú bấm.
-    if (r.verdict === "DANGER") {
-      for (const l of t.links) {
-        l.el.classList.add("ps-danger-link");
-        l.el.addEventListener("click", (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          gate(l.href);
-        });
-      }
-    }
+    // Tầng 2: hỏi AI, rồi thay kết quả tạm bằng kết luận thật.
+    let full;
+    try { full = await ask(text, "/analyze"); } catch (err) { full = { ok: false, error: String(err) }; }
+    if (!stillCurrent()) return;
+
+    paint(full?.ok ? full.data : OFFLINE(full?.error), t, false);
   }
 
   A.onThreadChange(onThread);

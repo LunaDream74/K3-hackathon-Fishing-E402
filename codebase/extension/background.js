@@ -12,8 +12,10 @@
 
 const BRIDGE_URL = "http://127.0.0.1:8777";
 
-async function analyze(text) {
-  const res = await fetch(`${BRIDGE_URL}/analyze`, {
+async function analyze(text, path = "/analyze") {
+  // Chỉ cho phép đúng hai đường, không nhận path tuỳ ý từ content script.
+  const route = path === "/scan" ? "/scan" : "/analyze";
+  const res = await fetch(`${BRIDGE_URL}${route}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),
@@ -25,7 +27,7 @@ async function analyze(text) {
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type !== "PS_ANALYZE") return false;
 
-  analyze(msg.text)
+  analyze(msg.text, msg.path)
     .then((data) => sendResponse({ ok: true, data }))
     .catch((err) =>
       // Hỏng bridge KHÔNG được im lặng thành "an toàn" — trả lỗi để UI nói thật.

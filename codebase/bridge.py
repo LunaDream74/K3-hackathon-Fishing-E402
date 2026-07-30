@@ -93,6 +93,41 @@ def _to_contract(raw: dict, tier: str) -> dict:
     }
 
 
+def scan_only(text: str) -> dict:
+    """
+    CHỈ chạy tầng luật tĩnh. Không bao giờ gọi LLM, nên trả về gần như tức thì.
+
+    Giao diện gọi endpoint này trước để có câu trả lời ngay, rồi mới nâng cấp
+    bằng /analyze nếu cần. Gọi LLM mất vài giây — trong lúc đó người dùng đang
+    đọc thư mà không có cảnh báo nào, nên phải nói được điều gì đó ngay lập tức.
+
+    `pending_llm = True` nghĩa là: đây chưa phải kết luận cuối cùng.
+    """
+    scan = scan_text_and_urls(text)
+
+    if not scan.get("needs_llm_call", True):
+        out = _to_contract(scan["deterministic_result"], tier="local")
+        out["pending_llm"] = False
+        return out
+
+    # Chưa kết luận được bằng luật: NGHI VẤN + THẤP, kèm những gì tầng 1 đã thấy.
+    # Tuyệt đối không trả AN TOÀN ở đây.
+    reasons = [r for a in scan.get("url_analyses", []) for r in a.get("reasons", [])]
+    return {
+        "engine": "v1",
+        "tier": "local",
+        "verdict": "DOUBT",
+        "risk_score": None,
+        "confidence": "THẤP",
+        "evidence": [{"tone": "info", "text": r} for r in dict.fromkeys(reasons)]
+                    or [{"tone": "info", "text": "Có tên miền lạ cần thẩm định sâu hơn."}],
+        "recommendation": "Đang kiểm tra kỹ hơn. Khoan bấm liên kết nào cho tới khi có kết luận.",
+        "analysis_source": "RULE_ENGINE (chờ tầng AI)",
+        "extracted_urls": scan.get("extracted_urls", []),
+        "pending_llm": _HAS_KEY,
+    }
+
+
 def analyze(text: str) -> dict:
     """Chạy đúng luồng hai tầng của v1."""
     scan = scan_text_and_urls(text)
@@ -141,7 +176,7 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, {"ok": True, "engine": "v1", "llm_enabled": _HAS_KEY})
 
     def do_POST(self):
-        if self.path != "/analyze":
+        if self.path not in ("/analyze", "/scan"):
             self.send_error(404)
             return
         try:
@@ -151,7 +186,7 @@ class Handler(BaseHTTPRequestHandler):
             if not text.strip():
                 self._json(400, {"error": "thiếu trường 'text'"})
                 return
-            self._json(200, analyze(text))
+            self._json(200, scan_only(text) if self.path == "/scan" else analyze(text))
         except Exception as exc:
             traceback.print_exc()
             self._json(500, {"error": str(exc)})
