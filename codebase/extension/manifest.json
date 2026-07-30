@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "PhishShield AI",
+  "version": "1.0.0",
+  "description": "Cảnh báo email lừa đảo ngay trong hộp thư, trước khi bạn bấm vào liên kết.",
+
+  "content_scripts": [
+    {
+      "matches": [
+        "http://localhost:8931/*",
+        "http://127.0.0.1:8931/*",
+        "https://mail.google.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "background": { "service_worker": "background.js" },
+
+  "host_permissions": ["http://127.0.0.1:8777/*"],
+
+  "web_accessible_resources": [
+    {
+      "resources": ["adapters/*.js"],
+      "matches": ["http://localhost:8931/*", "http://127.0.0.1:8931/*", "https://mail.google.com/*"]
+    }
+  ]
+}
