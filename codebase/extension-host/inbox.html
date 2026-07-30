@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hộp thư — Máy chủ thử cho tiện ích PhishShield</title>
+<!--
+  ============================================================================
+  HOST PAGE — hộp thư giả lập để tiện ích PhishShield tiêm vào.
+
+  QUY TẮC SỐ MỘT: file này KHÔNG chứa một dòng nào của PhishShield.
+  Nó là "trang chủ nhà" — tiện ích phải tự tìm, tự đọc, tự chèn vào.
+  Nếu bạn thấy mình sắp thêm logic phân tích vào đây, dừng lại: chỗ đó
+  thuộc về content script của tiện ích.
+
+  Trang này cố tình mô phỏng phần KHÓ của Gmail, không phải phần dễ:
+  mở một thư khác KHÔNG tải lại trang — DOM bị thay tại chỗ (giống SPA).
+  Nhờ vậy adapter viết cho trang này sẽ chuyển sang Gmail được, vì nó
+  buộc phải dùng MutationObserver ngay từ đầu.
+
+  Hợp đồng DOM: xem DOM-CONTRACT.md cùng thư mục.
+  ============================================================================
+-->
+<style>
+  :root {
+    --app: #ffffff; --app-2: #f4f6f9; --app-3: #e9edf3;
+    --rule: #dbe1ea; --ink: #11151c; --ink-2: #4b5566; --ink-3: #6b7385;
+    --sel: #e7eafb; --sel-ink: #1f34c4;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
+    --sans: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: var(--sans); font-size: 15px; color: var(--ink); background: var(--app); line-height: 1.55; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+
+  .top {
+    display: flex; align-items: center; gap: 14px; padding: 10px 18px;
+    border-bottom: 1px solid var(--rule); background: var(--app-2);
+  }
+  .top .logo { font-size: 17px; font-weight: 700; letter-spacing: -.02em; }
+  .top .search {
+    flex: 1; max-width: 620px; background: var(--app); border: 1px solid var(--rule);
+    border-radius: 8px; padding: 8px 13px; color: var(--ink-3); font-size: 14px;
+  }
+  .top .me { width: 32px; height: 32px; border-radius: 50%; background: var(--app-3); display: grid; place-items: center; font-weight: 700; font-size: 13px; color: var(--ink-2); }
+
+  .wrap { display: grid; grid-template-columns: 176px 300px minmax(0, 1fr); min-height: calc(100vh - 53px); }
+  @media (max-width: 1000px) { .wrap { grid-template-columns: 1fr; } .nav, .list { display: none; } }
+
+  .nav { padding: 14px 10px; border-right: 1px solid var(--rule); background: var(--app-2); }
+  .nav .new { width: 100%; text-align: left; background: var(--app); border: 1px solid var(--rule); border-radius: 18px; padding: 9px 15px; font-weight: 600; color: var(--ink-2); margin-bottom: 14px; }
+  .nav ul { list-style: none; margin: 0; padding: 0; }
+  .nav li { padding: 7px 12px; border-radius: 14px; font-size: 14px; color: var(--ink-2); display: flex; }
+  .nav li.on { background: var(--sel); color: var(--sel-ink); font-weight: 700; }
+  .nav li .n { margin-left: auto; font-family: var(--mono); font-size: 11.5px; }
+
+  .list { border-right: 1px solid var(--rule); overflow-y: auto; }
+  .row {
+    display: block; width: 100%; text-align: left; background: transparent; border: 0;
+    border-bottom: 1px solid var(--rule); padding: 11px 14px;
+  }
+  .row:hover { background: var(--app-2); }
+  .row[aria-current="true"] { background: var(--sel); }
+  .row:focus-visible { outline: 2px solid var(--sel-ink); outline-offset: -2px; }
+  .row .l1 { display: flex; align-items: baseline; gap: 8px; }
+  .row .who { font-size: 14px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .t { margin-left: auto; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
+  .row .sub { font-size: 14px; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .snip { font-size: 12.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row.unread .who, .row.unread .sub { font-weight: 700; color: var(--ink); }
+
+  .read { padding: 20px clamp(16px, 3vw, 34px) 60px; overflow-y: auto; }
+  .read h1 { margin: 0 0 16px; font-size: 22px; font-weight: 600; letter-spacing: -.015em; }
+  .from { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+  .from .av { width: 38px; height: 38px; border-radius: 50%; background: var(--app-3); display: grid; place-items: center; font-weight: 700; color: var(--ink-2); font-size: 14px; flex: none; }
+  .from .who b { font-size: 14.5px; }
+  .from .who .addr { font-family: var(--mono); font-size: 12.5px; color: var(--ink-2); word-break: break-all; }
+  .from .when { margin-left: auto; font-size: 12.5px; color: var(--ink-3); white-space: nowrap; }
+
+  details.orig { margin: 14px 0 0; border: 1px solid var(--rule); border-radius: 6px; background: var(--app-2); }
+  details.orig summary { padding: 8px 13px; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+  details.orig pre {
+    margin: 0; padding: 0 13px 13px; font-family: var(--mono); font-size: 12px; color: var(--ink-2);
+    white-space: pre-wrap; word-break: break-word; overflow-x: auto;
+  }
+
+  .msgbody { margin-top: 18px; font-size: 15px; line-height: 1.75; max-width: 68ch; }
+  .msgbody p { margin: 0 0 13px; }
+  .msgbody a { color: #1a56d6; word-break: break-all; }
+
+  .replybar { margin-top: 26px; display: flex; gap: 9px; }
+  .replybar button { border: 1px solid var(--rule); background: var(--app); border-radius: 18px; padding: 8px 18px; font-size: 14px; color: var(--ink-2); }
+
+  .devnote {
+    margin: 26px 0 0; border-top: 1px dashed var(--rule); padding-top: 12px;
+    font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); line-height: 1.7;
+  }
+</style>
+</head>
+
+<!-- Hợp đồng: adapter dùng 2 thuộc tính này để nhận ra host + phiên bản hợp đồng -->
+<body data-ps-host="inbox-mock" data-ps-contract="1">
+
+<div class="top">
+  <span class="logo">Thư</span>
+  <div class="search">Tìm trong thư</div>
+  <div class="me">MT</div>
+</div>
+
+<div class="wrap">
+  <div class="nav">
+    <button class="new" type="button">✏️ Soạn thư</button>
+    <ul>
+      <li class="on">Hộp thư đến <span class="n" id="unreadCount">3</span></li>
+      <li>Đã gắn dấu</li>
+      <li>Đã gửi</li>
+      <li>Thư nháp <span class="n">2</span></li>
+      <li>Thư rác <span class="n">31</span></li>
+    </ul>
+  </div>
+
+  <div class="list" id="list" role="list"></div>
+
+  <!--
+    Khung đọc thư. Toàn bộ phần bên trong bị THAY MỚI mỗi lần mở thư khác
+    (không tải lại trang) — đúng như Gmail. Adapter phải theo dõi bằng
+    MutationObserver, không được đọc một lần rồi thôi.
+  -->
+  <div class="read" id="read"></div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* Dữ liệu thư. `raw` là header gốc — trong Gmail thật phần này KHÔNG nằm
+     sẵn trong DOM (phải mở "Hiển thị bản gốc"). Xem DOM-CONTRACT.md §5. */
+  var MAIL = [
+    {
+      id: "t-8842", unread: true, time: "09:41",
+      name: "IT Support", initials: "IT", addr: "it-security@vinai-verify-account.tk",
+      subject: "[KHẨN] Tài khoản của bạn sẽ bị khoá trong 30 phút",
+      snippet: "Hệ thống ghi nhận hoạt động bất thường trên tài khoản của bạn…",
+      raw:
+        "From: IT Support <it-security@vinai-verify-account.tk>\n" +
+        "Reply-To: helpdesk@mail-secure123.xyz\n" +
+        "Return-Path: <bounce@mail-secure123.xyz>\n" +
+        "Subject: [KHẨN] Tài khoản của bạn sẽ bị khoá trong 30 phút\n" +
+        "Authentication-Results: mx.example.com; spf=fail dkim=fail dmarc=fail",
+      body:
+        "<p>Kính gửi nhân viên,</p>" +
+        "<p>Hệ thống ghi nhận hoạt động bất thường trên tài khoản của bạn. Tài khoản sẽ bị khoá " +
+        "trong 30 phút nếu bạn không xác minh ngay lập tức.</p>" +
+        '<p>Xác minh tại: <a href="https://vinai-verify-account.tk/login-secure">https://vinai-verify-account.tk/login-secure</a></p>' +
+        "<p>Trân trọng,<br>Phòng IT / An ninh mạng</p>"
+    },
+    {
+      id: "t-8839", unread: true, time: "08:12",
+      name: "HR Thông báo", initials: "HR", addr: "hr-notice@doitac-nhansu.com",
+      subject: "Cập nhật thông tin tài khoản trước thứ Sáu",
+      snippet: "Phòng nhân sự cần bạn cập nhật lại thông tin tài khoản…",
+      raw:
+        "From: HR Thông báo <hr-notice@doitac-nhansu.com>\n" +
+        "Subject: Cập nhật thông tin tài khoản trước thứ Sáu",
+      body:
+        "<p>Chào bạn,</p>" +
+        "<p>Phòng nhân sự cần bạn cập nhật lại thông tin tài khoản trước thứ Sáu tuần này.</p>" +
+        "<p>Bạn đăng nhập giúp mình nhé. Nếu có vướng mắc, trả lời thư này.</p>" +
+        "<p>Cảm ơn bạn.</p>"
+    },
+    {
+      id: "t-8831", unread: true, time: "Hôm qua",
+      name: "IT Support", initials: "IT", addr: "it-support@vinai.io",
+      subject: "Bảo trì hệ thống email cuối tuần",
+      snippet: "Phòng IT sẽ bảo trì hệ thống email định kỳ vào 22:00 Thứ Bảy…",
+      raw:
+        "From: IT Support <it-support@vinai.io>\n" +
+        "Subject: Bảo trì hệ thống email cuối tuần\n" +
+        "Authentication-Results: mx.example.com; spf=pass dkim=pass dmarc=pass",
+      body:
+        "<p>Chào các anh chị,</p>" +
+        "<p>Phòng IT sẽ bảo trì hệ thống email định kỳ vào 22:00 Thứ Bảy tuần này. Một số dịch vụ " +
+        "có thể gián đoạn khoảng 30 phút. Anh chị không cần thao tác gì thêm.</p>" +
+        '<p>Trạng thái hệ thống: <a href="https://vlearn.vn/status">https://vlearn.vn/status</a></p>' +
+        "<p>Trân trọng,<br>Phòng IT — VinAI</p>"
+    },
+    {
+      id: "t-8820", unread: false, time: "Thứ Ba",
+      name: "Thư viện VinUni", initials: "TV", addr: "library@vin-university.edu.vn",
+      subject: "Sách bạn mượn sắp đến hạn trả",
+      snippet: "Cuốn 'Designing Data-Intensive Applications' đến hạn ngày 04/08…",
+      raw:
+        "From: Thư viện VinUni <library@vin-university.edu.vn>\n" +
+        "Subject: Sách bạn mượn sắp đến hạn trả\n" +
+        "Authentication-Results: mx.example.com; spf=pass dkim=pass dmarc=pass",
+      body:
+        "<p>Chào bạn,</p>" +
+        "<p>Cuốn <i>Designing Data-Intensive Applications</i> bạn mượn sẽ đến hạn trả ngày 04/08.</p>" +
+        "<p>Bạn có thể gia hạn thêm 14 ngày ngay tại quầy.</p>" +
+        "<p>Thư viện VinUni</p>"
+    },
+    {
+      id: "t-8814", unread: false, time: "Thứ Hai",
+      name: "Nhóm K3", initials: "K3", addr: "no-reply@vlearn.vn",
+      subject: "Nhắc lịch: buổi review sản phẩm 16:00 thứ Năm",
+      snippet: "Nhóm mình họp review sản phẩm lúc 16:00 thứ Năm tuần này…",
+      raw:
+        "From: Nhóm K3 <no-reply@vlearn.vn>\n" +
+        "Subject: Nhắc lịch: buổi review sản phẩm 16:00 thứ Năm\n" +
+        "Authentication-Results: mx.example.com; spf=pass dkim=pass dmarc=pass",
+      body:
+        "<p>Chào cả nhóm,</p>" +
+        "<p>Nhóm mình họp review sản phẩm lúc 16:00 thứ Năm tuần này. Mọi người chuẩn bị bản demo nhé.</p>" +
+        "<p>Cảm ơn cả nhà.</p>"
+    }
+  ];
+
+  var listEl = document.getElementById("list");
+  var readEl = document.getElementById("read");
+
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  function drawList(activeId) {
+    listEl.innerHTML = MAIL.map(function (m) {
+      return '<button class="row' + (m.unread ? " unread" : "") + '" role="listitem" type="button" ' +
+             'data-open="' + m.id + '" aria-current="' + (m.id === activeId) + '">' +
+               '<div class="l1"><span class="who">' + esc(m.name) + "</span>" +
+               '<span class="t">' + esc(m.time) + "</span></div>" +
+               '<div class="sub">' + esc(m.subject) + "</div>" +
+               '<div class="snip">' + esc(m.snippet) + "</div>" +
+             "</button>";
+    }).join("");
+  }
+
+  /* Mở thư = thay mới toàn bộ khung đọc. KHÔNG tải lại trang.
+     Đây chính là điều buộc adapter phải dùng MutationObserver. */
+  function openMail(id) {
+    var m = MAIL.filter(function (x) { return x.id === id; })[0];
+    if (!m) return;
+    m.unread = false;
+
+    readEl.innerHTML =
+      '<article data-ps-thread data-ps-thread-id="' + esc(m.id) + '">' +
+        '<h1 data-ps-field="subject">' + esc(m.subject) + "</h1>" +
+        '<div class="from">' +
+          '<div class="av">' + esc(m.initials) + "</div>" +
+          '<div class="who">' +
+            '<b data-ps-field="from-name">' + esc(m.name) + "</b>" +
+            '<div class="addr" data-ps-field="from-address">' + esc(m.addr) + "</div>" +
+          "</div>" +
+          '<div class="when" data-ps-field="date">' + esc(m.time) + "</div>" +
+        "</div>" +
+
+        /* Điểm tiện ích chèn banner vào. Host chừa sẵn chỗ, không tự vẽ gì. */
+        '<div data-ps-slot="banner"></div>' +
+
+        '<details class="orig"><summary>Hiển thị bản gốc (header)</summary>' +
+          '<pre data-ps-field="raw-headers">' + esc(m.raw) + "</pre>" +
+        "</details>" +
+
+        '<div class="msgbody" data-ps-field="body">' + m.body + "</div>" +
+
+        '<div class="replybar">' +
+          "<button type=\"button\">↩︎ Trả lời</button>" +
+          "<button type=\"button\">↪︎ Chuyển tiếp</button>" +
+        "</div>" +
+
+        '<div class="devnote">host: inbox-mock · contract v1 · thread ' + esc(m.id) +
+        " — trang này không chứa mã PhishShield; tiện ích phải tự tiêm vào.</div>" +
+      "</article>";
+
+    document.getElementById("unreadCount").textContent =
+      MAIL.filter(function (x) { return x.unread; }).length || "";
+    drawList(id);
+  }
+
+  listEl.addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-open]");
+    if (btn) openMail(btn.getAttribute("data-open"));
+  });
+
+  drawList(MAIL[0].id);
+  openMail(MAIL[0].id);
+})();
+</script>
+</body>
+</html>
