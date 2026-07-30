@@ -66,6 +66,17 @@ async function callBridge(text, route) {
   return res.json();
 }
 
+/* Các yêu cầu ĐANG BAY, gộp theo cùng một khoá.
+
+   Bộ đệm chỉ có dữ liệu SAU KHI một lượt gọi xong. Nếu người dùng mở một thư,
+   rời đi, rồi quay lại ngay trong lúc lượt gọi đầu chưa về, cả hai lượt đều
+   trượt đệm và ta trả tiền hai lần cho đúng một email.
+
+   Đo thực tế cho thấy có lúc không bị, nhưng chỉ vì lượt đầu tình cờ về kịp —
+   tức là phụ thuộc vào độ trễ mạng, không phải vào thiết kế. Gộp lại thì
+   lượt thứ hai chờ chính lời hứa của lượt đầu, và chỉ có duy nhất một lời gọi. */
+const inflight = new Map();   // key -> Promise
+
 async function analyze(text, path = "/analyze") {
   // Chỉ cho phép đúng hai đường, không nhận path tuỳ ý từ content script.
   const route = path === "/scan" ? "/scan" : "/analyze";
@@ -76,7 +87,13 @@ async function analyze(text, path = "/analyze") {
   const hit = cacheGet(key);
   if (hit) return { ...hit, cached: true };   // không tốn một token nào
 
-  const data = await callBridge(text, route);
+  const pending = inflight.get(key);
+  if (pending) return { ...(await pending), cached: true };
+
+  const p = callBridge(text, route).finally(function () { inflight.delete(key); });
+  inflight.set(key, p);
+
+  const data = await p;        // lỗi thì ném ra cho cả bên gọi lẫn bên đang chờ
   cacheSet(key, data);
   return { ...data, cached: false };
 }

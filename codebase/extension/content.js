@@ -154,6 +154,7 @@
      (khi content script được nạp tay vào DevTools, không qua tiện ích thật).
      background.js mới là bản chính — sửa hành vi thì sửa ở đó trước. */
   const devCache = new Map();
+  const devInflight = new Map();
   const DEV_TTL = 15 * 60 * 1000;
 
   async function ask(text, path) {
@@ -163,15 +164,25 @@
         if (hit && Date.now() - hit.at < DEV_TTL) {
           return { ok: true, data: { ...hit.data, cached: true } };
         }
+        // gộp các lượt đang bay, giống background.js
+        const pending = devInflight.get(text);
+        if (pending) return { ok: true, data: { ...(await pending), cached: true } };
       }
-      const res = await fetch("http://127.0.0.1:8777" + path, {
+
+      const call = fetch("http://127.0.0.1:8777" + path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
-      });
-      const data = await res.json();
-      if (path === "/analyze" && res.ok) devCache.set(text, { data, at: Date.now() });
-      return { ok: res.ok, data: { ...data, cached: false } };
+      }).then((res) => res.json());
+
+      if (path === "/analyze") {
+        devInflight.set(text, call);
+        call.finally(() => devInflight.delete(text));
+      }
+
+      const data = await call;
+      if (path === "/analyze") devCache.set(text, { data, at: Date.now() });
+      return { ok: true, data: { ...data, cached: false } };
     }
     return chrome.runtime.sendMessage({ type: "PS_ANALYZE", text, path });
   }
