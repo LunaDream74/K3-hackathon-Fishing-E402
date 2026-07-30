@@ -1,0 +1,552 @@
+<title>PhishShield AI — Tiện ích Chrome trong hộp thư</title>
+<style>
+  /* ============================================================
+     PhishShield AI — extension experience, design source of truth
+     The product is a GUEST inside someone else's inbox. So the mail
+     client is deliberately neutral and light; PhishShield is the one
+     branded thing on screen. It must be recognisable without
+     pretending to be part of the mail app.
+     Quiet by default: safe mail gets one thin line, not a banner.
+     ============================================================ */
+  :root {
+    color-scheme: light;
+
+    /* the host app — intentionally plain, not any real product's trade dress */
+    --chrome:    #d8dce3;
+    --chrome-2:  #c3c9d3;
+    --app:       #ffffff;
+    --app-2:     #f4f6f9;
+    --app-3:     #e9edf3;
+    --app-rule:  #dbe1ea;
+    --app-ink:   #11151c;   /* 17.6:1 on white */
+    --app-ink-2: #4b5566;   /* 7.4:1  on white */
+
+    /* PhishShield's own ink — the blue pencil */
+    --ps:      #1f34c4;
+    --ps-soft: #e7eaFB;
+
+    /* risk inks, all >= 4.9:1 on white */
+    --bad:  #bf0f1d;  --bad-bg:  #fdecec;  --bad-line:  #f2b7b7;
+    --warn: #835500;  --warn-bg: #fcf3de;  --warn-line: #e8cb8d;
+    --good: #0a6a3e;  --good-bg: #e4f5eb;  --good-line: #a6d9bd;
+
+    --mono: ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", monospace;
+    --sans: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #0e1116; color: var(--app-ink);
+    font-family: var(--sans); font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; }
+
+  /* ---------------- demo scaffolding (outside the mock) ---------------- */
+  .demobar {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 12px clamp(14px, 3vw, 26px); background: #0e1116; border-bottom: 1px solid #232a36;
+    position: sticky; top: 0; z-index: 60;
+  }
+  .demobar .wm {
+    font-family: var(--mono); font-size: 13px; font-weight: 700; letter-spacing: .16em;
+    text-transform: uppercase; color: #eef1f7;
+  }
+  .demobar .wm i { font-style: normal; color: #7d93ff; }
+  .demobar .hint { font-family: var(--mono); font-size: 12.5px; color: #b3bccc; }
+  .demobar .grow { flex: 1; }
+  .sw { display: flex; gap: 5px; flex-wrap: wrap; }
+  .sw button {
+    font-family: var(--mono); font-size: 12.5px; font-weight: 600; padding: 6px 11px;
+    background: #1a1e27; color: #b3bccc; border: 1px solid #2e3442; border-radius: 2px;
+  }
+  .sw button:hover { border-color: #7d93ff; color: #eef1f7; }
+  .sw button[aria-pressed="true"] { background: #7d93ff; border-color: #7d93ff; color: #0e1116; }
+  .sw button:focus-visible { outline: 2px solid #7d93ff; outline-offset: 2px; }
+
+  /* ---------------- browser frame ---------------- */
+  .frame { max-width: 1280px; margin: clamp(14px, 3vw, 28px) auto; padding: 0 clamp(10px, 2.5vw, 22px); }
+  .win { border-radius: 9px 9px 6px 6px; overflow: hidden; box-shadow: 0 26px 60px -18px rgba(0,0,0,.8); }
+
+  .tabstrip { background: var(--chrome-2); padding: 7px 10px 0; display: flex; align-items: flex-end; gap: 7px; }
+  .tab {
+    background: var(--app); border-radius: 7px 7px 0 0; padding: 8px 14px; font-size: 12.5px;
+    display: flex; align-items: center; gap: 8px; max-width: 260px; color: var(--app-ink-2);
+  }
+  .tab .dot { width: 13px; height: 13px; border-radius: 3px; background: var(--app-3); flex: none; }
+  .tab b { color: var(--app-ink); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .omnibox { background: var(--chrome); padding: 8px 11px; display: flex; align-items: center; gap: 9px; }
+  .url {
+    flex: 1; background: var(--app); border-radius: 14px; padding: 6px 13px;
+    font-size: 12.5px; color: var(--app-ink-2); font-family: var(--mono);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* the extension's own button in the toolbar — proof it is an extension */
+  .extbtn {
+    display: flex; align-items: center; gap: 7px; background: var(--app); border: 1px solid var(--app-rule);
+    border-radius: 14px; padding: 5px 11px 5px 7px; position: relative; flex: none;
+  }
+  .extbtn .glyph {
+    width: 21px; height: 21px; border-radius: 5px; background: var(--ps); color: #fff;
+    display: grid; place-items: center; flex: none;
+  }
+  .extbtn .glyph svg { width: 13px; height: 13px; }
+  .extbtn .cnt {
+    font-family: var(--mono); font-size: 11.5px; font-weight: 700; color: var(--v, var(--app-ink-2));
+  }
+  .extbtn .pip {
+    position: absolute; top: 2px; left: 20px; min-width: 15px; height: 15px; padding: 0 4px;
+    border-radius: 8px; background: var(--v, var(--app-ink-2)); color: #fff;
+    font-family: var(--mono); font-size: 10px; font-weight: 700;
+    display: grid; place-items: center; border: 2px solid var(--app);
+  }
+
+  /* ---------------- the mail app ---------------- */
+  .app { display: grid; grid-template-columns: 186px minmax(0, 1fr); background: var(--app); min-height: 560px; }
+  @media (max-width: 800px) { .app { grid-template-columns: minmax(0, 1fr); } .folders { display: none; } }
+
+  .folders { background: var(--app-2); border-right: 1px solid var(--app-rule); padding: 14px 10px; }
+  .folders .compose {
+    width: 100%; text-align: left; background: var(--app); border: 1px solid var(--app-rule);
+    border-radius: 18px; padding: 9px 15px; font-size: 13.5px; font-weight: 600; color: var(--app-ink-2);
+    margin-bottom: 14px;
+  }
+  .folders ul { list-style: none; margin: 0; padding: 0; }
+  .folders li { padding: 7px 12px; border-radius: 14px; font-size: 13.5px; color: var(--app-ink-2); display: flex; gap: 9px; }
+  .folders li.on { background: var(--ps-soft); color: var(--ps); font-weight: 700; }
+  .folders li .n { margin-left: auto; font-family: var(--mono); font-size: 11.5px; }
+
+  .reader { padding: 0 0 30px; min-width: 0; }
+  .msg-hd { padding: 18px clamp(14px, 2.4vw, 26px) 0; }
+  .msg-hd h1 { margin: 0 0 14px; font-size: clamp(18px, 2.3vw, 22px); font-weight: 600; letter-spacing: -.01em; }
+  .sender { display: flex; align-items: center; gap: 11px; }
+  .avatar {
+    width: 36px; height: 36px; border-radius: 50%; background: var(--app-3); flex: none;
+    display: grid; place-items: center; font-weight: 700; color: var(--app-ink-2); font-size: 14px;
+  }
+  .sender .who { min-width: 0; }
+  .sender .who b { font-size: 14.5px; }
+  .sender .who .addr { font-family: var(--mono); font-size: 12.5px; color: var(--app-ink-2); word-break: break-all; }
+  .sender .when { margin-left: auto; font-size: 12.5px; color: var(--app-ink-2); white-space: nowrap; }
+
+  /* sender address gets marked in place when it is the problem */
+  .addr .flag { color: var(--bad); border-bottom: 2px solid var(--bad); font-weight: 700; padding-bottom: 1px; }
+
+  /* ---------------- THE BANNER — PhishShield's one piece of real estate ---------------- */
+  .ban { margin: 16px clamp(14px, 2.4vw, 26px) 0; border-radius: 6px; overflow: hidden;
+         border: 1px solid var(--v-line); background: var(--v-bg); }
+  .ban.r-bad  { --v: var(--bad);  --v-bg: var(--bad-bg);  --v-line: var(--bad-line); }
+  .ban.r-warn { --v: var(--warn); --v-bg: var(--warn-bg); --v-line: var(--warn-line); }
+  .ban.r-good { --v: var(--good); --v-bg: var(--good-bg); --v-line: var(--good-line); }
+
+  .ban-top { display: flex; align-items: flex-start; gap: 13px; padding: 14px 16px; }
+  .ban .lamp {
+    width: 34px; height: 34px; border-radius: 7px; background: var(--v); color: #fff;
+    display: grid; place-items: center; flex: none; margin-top: 1px;
+  }
+  .ban .lamp svg { width: 19px; height: 19px; }
+  .ban .core { flex: 1; min-width: 0; }
+  .ban .word {
+    font-family: var(--mono); font-size: 16px; font-weight: 700; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--v); line-height: 1.2;
+  }
+  .ban .say { margin-top: 4px; font-size: 15px; color: var(--app-ink); }
+  .ban .ctl { display: flex; gap: 7px; flex: none; }
+  .ban .ctl button {
+    background: var(--app); border: 1px solid var(--v-line); border-radius: 4px;
+    font-family: var(--mono); font-size: 12.5px; font-weight: 600; padding: 7px 11px; color: var(--v);
+  }
+  .ban .ctl button:hover { background: var(--v); color: #fff; }
+  .ban .ctl button:focus-visible { outline: 2px solid var(--ps); outline-offset: 2px; }
+
+  /* evidence, folded inside the banner */
+  .ban-ev { border-top: 1px solid var(--v-line); padding: 4px 16px 12px; }
+  .ban-ev ol { list-style: none; margin: 0; padding: 0; }
+  .ban-ev li {
+    display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 10px; align-items: start;
+    padding: 9px 0; border-bottom: 1px solid var(--v-line); font-size: 14px;
+  }
+  .ban-ev li:last-child { border-bottom: 0; }
+  .ban-ev .k {
+    width: 19px; height: 19px; border-radius: 50%; background: var(--v); color: #fff;
+    font-family: var(--mono); font-size: 11px; font-weight: 700; display: grid; place-items: center; margin-top: 2px;
+  }
+  /* the privacy line — what left the machine, always stated */
+  .ban-foot {
+    border-top: 1px solid var(--v-line); padding: 9px 16px;
+    display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+    font-family: var(--mono); font-size: 12px; color: var(--app-ink-2);
+  }
+  .ban-foot .tier {
+    border: 1px solid var(--app-rule); background: var(--app); border-radius: 3px; padding: 3px 8px; font-weight: 600;
+  }
+  .ban-foot .tier.local { color: var(--good); border-color: var(--good-line); }
+  .ban-foot .tier.cloud { color: var(--ps); border-color: var(--ps); }
+
+  /* the quiet state — safe mail gets ONE LINE, never a banner */
+  .quiet {
+    margin: 14px clamp(14px, 2.4vw, 26px) 0; display: flex; align-items: center; gap: 9px;
+    font-size: 13px; color: var(--app-ink-2); padding: 7px 11px;
+    border-left: 3px solid var(--good); background: var(--app-2); border-radius: 0 4px 4px 0;
+  }
+  .quiet .tick { color: var(--good); font-weight: 700; }
+  .quiet .tier { font-family: var(--mono); font-size: 11.5px; margin-left: auto; color: var(--good); }
+
+  /* ---------------- message body ---------------- */
+  .body { padding: 18px clamp(14px, 2.4vw, 26px) 0; font-size: 15px; line-height: 1.75; max-width: 68ch; }
+  .body p { margin: 0 0 13px; }
+
+  /* PhishShield annotates the real email in place */
+  .body .mk { border-bottom: 2px solid var(--bad); color: var(--bad); font-weight: 600; padding-bottom: 1px; }
+  .body .mk.warn { border-color: var(--warn); color: var(--warn); }
+
+  /* a flagged link keeps looking like a link, but wears its warning */
+  a.link { color: var(--ps); word-break: break-all; }
+  a.danger-link {
+    color: var(--bad); text-decoration: none; border-bottom: 2px solid var(--bad);
+    background: var(--bad-bg); padding: 2px 5px; border-radius: 3px; font-weight: 600;
+    display: inline-flex; align-items: baseline; gap: 6px; word-break: break-all;
+  }
+  a.danger-link::before { content: "⚠"; font-size: 12px; }
+  a.danger-link:hover { background: var(--bad); color: #fff; }
+  a.danger-link:focus-visible { outline: 2px solid var(--ps); outline-offset: 2px; }
+
+  .hovertip {
+    position: absolute; z-index: 40; max-width: 330px; background: #11151c; color: #fff;
+    border-radius: 5px; padding: 10px 12px; font-size: 13px; line-height: 1.45;
+    box-shadow: 0 10px 30px rgba(0,0,0,.45); pointer-events: none; opacity: 0; transition: opacity .13s;
+  }
+  .hovertip.on { opacity: 1; }
+  .hovertip b { font-family: var(--mono); font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase; color: #ff8f84; display: block; margin-bottom: 4px; }
+  @media (prefers-reduced-motion: reduce) { .hovertip { transition: none; } }
+
+  /* ---------------- click interstitial — the last gate ----------------
+     Fixed to the viewport, not to the mock window. A real content script
+     overlays the viewport, and anchoring it to the (taller) page meant the
+     warning could open off-screen — the user clicks a dangerous link and
+     sees nothing. This is the one moment that must never be missable. */
+  .gate {
+    position: fixed; inset: 0; z-index: 100; background: rgba(10,13,18,.72);
+    display: grid; place-items: center; padding: 20px;
+  }
+  .gate-card {
+    background: var(--app); border-radius: 8px; max-width: 520px; width: 100%; overflow: hidden;
+    box-shadow: 0 24px 60px rgba(0,0,0,.5); border-top: 5px solid var(--bad);
+  }
+  .gate-card .hd { padding: 20px 22px 0; }
+  .gate-card h2 { margin: 0 0 8px; font-size: 21px; color: var(--bad); letter-spacing: -.015em; }
+  .gate-card p { margin: 0 0 12px; font-size: 15px; color: var(--app-ink); }
+  .gate-card .target {
+    font-family: var(--mono); font-size: 13px; background: var(--bad-bg); color: var(--bad);
+    border: 1px solid var(--bad-line); border-radius: 4px; padding: 9px 11px; word-break: break-all; margin-bottom: 14px;
+  }
+  .gate-card ul { margin: 0 0 6px; padding-left: 19px; font-size: 14px; color: var(--app-ink); }
+  .gate-card li { margin-bottom: 5px; }
+  .gate-act { display: flex; gap: 9px; padding: 16px 22px 20px; flex-wrap: wrap; align-items: center; }
+  .gate-act .safe {
+    background: var(--app-ink); color: #fff; border: 1px solid var(--app-ink);
+    border-radius: 5px; padding: 11px 17px; font-size: 14.5px; font-weight: 700;
+  }
+  .gate-act .risky {
+    background: transparent; border: 1px solid var(--app-rule); border-radius: 5px;
+    padding: 11px 15px; font-size: 13.5px; color: var(--app-ink-2);
+  }
+  .gate-act .risky:hover { border-color: var(--bad); color: var(--bad); }
+  .gate-act button:focus-visible { outline: 2px solid var(--ps); outline-offset: 2px; }
+  .gate-act .note { font-size: 12px; color: var(--app-ink-2); margin-left: auto; }
+
+  .stage { position: relative; }
+  .hidden { display: none !important; }
+
+  .notes {
+    max-width: 1280px; margin: 0 auto; padding: 4px clamp(24px, 4vw, 44px) 54px;
+    color: #b3bccc; font-size: 13.5px; line-height: 1.7;
+  }
+  .notes h3 {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: #7d93ff; margin: 22px 0 8px;
+  }
+  .notes b { color: #eef1f7; }
+  .notes code { font-family: var(--mono); font-size: 12.5px; color: #7d93ff; }
+  .notes ul { margin: 0; padding-left: 20px; }
+  .notes li { margin-bottom: 6px; }
+</style>
+
+<div class="demobar">
+  <span class="wm">Phish<i>Shield</i></span>
+  <span class="hint">Tiện ích Chrome — chạy ngay trong hộp thư</span>
+  <span class="grow"></span>
+  <div class="sw" id="sw"></div>
+</div>
+
+<div class="frame">
+  <div class="win stage" id="stage">
+    <!-- browser chrome -->
+    <div class="tabstrip">
+      <div class="tab"><span class="dot"></span><b id="tabTitle">Hộp thư — 1 thư chưa đọc</b></div>
+    </div>
+    <div class="omnibox">
+      <div class="url" id="url">mail.example.com/u/0/#inbox/FMfcgzQbdWmRxV</div>
+      <div class="extbtn" id="extBtn">
+        <span class="glyph" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3l7 3v5c0 4.4-3 8-7 10-4-2-7-5.6-7-10V6l7-3z"/>
+          </svg>
+        </span>
+        <span class="cnt" id="extCnt">PhishShield</span>
+        <span class="pip hidden" id="extPip">!</span>
+      </div>
+    </div>
+
+    <!-- the mail app -->
+    <div class="app">
+      <div class="folders">
+        <button class="compose" type="button">✏️ Soạn thư</button>
+        <ul>
+          <li class="on">Hộp thư đến <span class="n">12</span></li>
+          <li>Đã gắn dấu</li>
+          <li>Đã gửi</li>
+          <li>Thư nháp <span class="n">2</span></li>
+          <li>Thư rác <span class="n">31</span></li>
+        </ul>
+      </div>
+
+      <div class="reader">
+        <div class="msg-hd">
+          <h1 id="subject">—</h1>
+          <div class="sender">
+            <div class="avatar" id="avatar">IT</div>
+            <div class="who">
+              <b id="fromName">—</b>
+              <div class="addr" id="fromAddr">—</div>
+            </div>
+            <div class="when">09:41</div>
+          </div>
+        </div>
+
+        <!-- PhishShield injects here -->
+        <div id="inject"></div>
+
+        <div class="body" id="body"></div>
+      </div>
+    </div>
+
+    <!-- click gate -->
+    <div class="gate hidden" id="gate">
+      <div class="gate-card" role="dialog" aria-modal="true" aria-labelledby="gateTitle">
+        <div class="hd">
+          <h2 id="gateTitle">Khoan đã — trang này bị đánh dấu nguy hiểm</h2>
+          <p>Bạn vừa bấm vào một liên kết mà PhishShield cho là trang đăng nhập giả.</p>
+          <div class="target" id="gateTarget"></div>
+          <ul>
+            <li>Tên miền nhái thương hiệu nội bộ, không phải cổng thật của công ty.</li>
+            <li>Email chứa nó không qua được kiểm tra xác thực (SPF, DMARC).</li>
+            <li>Trang đích nhiều khả năng thu thập mật khẩu của bạn.</li>
+          </ul>
+        </div>
+        <div class="gate-act">
+          <button class="safe" type="button" id="gateBack">Quay lại, đừng mở</button>
+          <button class="risky" type="button" id="gateGo">Tôi hiểu rủi ro, vẫn mở</button>
+          <span class="note">Lựa chọn vẫn là của bạn.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="hovertip" id="tip"></div>
+
+<div class="notes">
+  <h3>Vì sao thiết kế như thế này</h3>
+  <ul>
+    <li><b>Im lặng khi không có gì.</b> Thư an toàn chỉ nhận <b>một dòng mảnh</b>, không phải banner.
+        Cảnh báo mà kêu suốt thì người dùng tắt tiện ích trong tuần đầu.</li>
+    <li><b>Chặn đúng khoảnh khắc bấm.</b> Banner cảnh báo trước, nhưng lớp chặn cuối cùng nằm ở
+        <b>cú bấm chuột</b> — nơi thiệt hại thật sự xảy ra.</li>
+    <li><b>Luôn nói rõ dữ liệu đi đâu.</b> Dòng cuối banner cho biết lần kiểm tra này chạy
+        <b>tại chỗ</b> hay đã <b>gửi tới AI</b>. Tiện ích đọc hộp thư thì phải sòng phẳng chuyện đó.</li>
+    <li><b>Người dùng giữ quyền quyết định.</b> Lớp chặn vẫn có lối đi tiếp — PhishShield đưa bằng chứng,
+        không khoá tay người dùng.</li>
+  </ul>
+  <h3>Khớp với backend đang có</h3>
+  <ul>
+    <li>Tầng luật tĩnh (<code>url_scanner.py</code>) chạy <b>tại chỗ</b> cho mọi thư mở ra — nhanh, miễn phí,
+        không gửi nội dung đi đâu cả.</li>
+    <li>Chỉ khi <code>needs_llm_call = true</code> mới gọi <code>gpt-4o-mini</code>. Đúng kiến trúc hai tầng
+        Hieu đã dựng, chỉ đổi chỗ hiển thị.</li>
+  </ul>
+  <p style="margin-top:18px"><b>Lưu ý.</b> Đây là <b>bản mô phỏng giao diện</b>. Ứng dụng thư ở trên là hộp thư
+  giả lập dựng riêng cho bản thiết kế này, không phải sản phẩm của bất kỳ hãng nào.</p>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+
+  var SHIELD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.4-3 8-7 10-4-2-7-5.6-7-10V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>';
+  var ALERT  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v5"/><path d="M12 17.5v.5"/><path d="M10.3 3.9 1.8 18.4A2 2 0 0 0 3.5 21.4h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>';
+
+  var CASES = {
+    danger: {
+      chip: "Nguy hiểm", tab: "Hộp thư — 1 thư chưa đọc",
+      subject: "[KHẨN] Tài khoản của bạn sẽ bị khoá trong 30 phút",
+      name: "IT Support", initials: "IT",
+      addr: 'it-security@<span class="flag">vinai-verify-account.tk</span>',
+      pip: "!", pipColor: "var(--bad)",
+      level: "r-bad", lamp: ALERT, word: "Nguy hiểm",
+      say: "Đừng bấm liên kết nào trong thư này.",
+      tier: { kind: "cloud", text: "Đã hỏi AI (gpt-4o-mini) vì tên miền lạ · chỉ gửi header + đường link" },
+      evidence: [
+        "Tên miền người gửi nhái tên công ty nhưng không phải domain thật.",
+        "Bấm Trả lời là thư đi sang <b>mail-secure123.xyz</b> — khác hẳn người gửi.",
+        "SPF và DMARC đều thất bại: thư không chứng minh được nguồn gốc.",
+        "Liên kết trong thư trỏ tới trang đăng nhập giả."
+      ],
+      body:
+        '<p>Kính gửi nhân viên,</p>' +
+        '<p>Hệ thống ghi nhận hoạt động bất thường trên tài khoản của bạn. Tài khoản sẽ ' +
+        '<span class="mk">bị khoá trong 30 phút</span> nếu bạn không ' +
+        '<span class="mk">xác minh ngay lập tức</span>.</p>' +
+        '<p>Xác minh tại: <a class="danger-link" href="#" id="badLink">https://vinai-verify-account.tk/login-secure</a></p>' +
+        '<p>Trân trọng,<br>Phòng IT / An ninh mạng</p>'
+    },
+
+    doubt: {
+      chip: "Nghi vấn", tab: "Hộp thư — 1 thư chưa đọc",
+      subject: "Cập nhật thông tin tài khoản trước thứ Sáu",
+      name: "HR Thông báo", initials: "HR",
+      addr: "hr-notice@doitac-nhansu.com",
+      pip: "?", pipColor: "var(--warn)",
+      level: "r-warn", lamp: ALERT, word: "Nghi vấn",
+      say: "Xác minh người gửi qua kênh khác trước khi làm theo.",
+      tier: { kind: "local", text: "Kiểm tra tại chỗ · nội dung thư không rời khỏi máy bạn" },
+      evidence: [
+        "Người gửi từ tên miền lạ, chưa có trong danh sách của công ty.",
+        "Thư đặt hạn chót và yêu cầu cập nhật thông tin tài khoản."
+      ],
+      body:
+        '<p>Chào bạn,</p>' +
+        '<p>Phòng nhân sự cần bạn <span class="mk warn">cập nhật lại thông tin tài khoản</span> ' +
+        'trước thứ Sáu tuần này.</p>' +
+        '<p>Bạn đăng nhập giúp mình nhé. Nếu có vướng mắc, trả lời thư này.</p>' +
+        '<p>Cảm ơn bạn.</p>'
+    },
+
+    safe: {
+      chip: "An toàn", tab: "Hộp thư — không có cảnh báo",
+      subject: "Bảo trì hệ thống email cuối tuần",
+      name: "IT Support", initials: "IT",
+      addr: "it-support@vinai.io",
+      pip: null, pipColor: "var(--good)",
+      quiet: true,
+      tier: { kind: "local", text: "Kiểm tra tại chỗ" },
+      body:
+        '<p>Chào các anh chị,</p>' +
+        '<p>Phòng IT sẽ bảo trì hệ thống email định kỳ vào 22:00 Thứ Bảy tuần này. ' +
+        'Một số dịch vụ có thể gián đoạn khoảng 30 phút. Anh chị không cần thao tác gì thêm.</p>' +
+        '<p>Trạng thái hệ thống: <a class="link" href="#">https://vlearn.vn/status</a></p>' +
+        '<p>Trân trọng,<br>Phòng IT — VinAI</p>'
+    }
+  };
+
+  var open = true;
+
+  /* Every close path goes through here — the gate locks page scroll while
+     it is up, and forgetting to unlock on one path leaves the page stuck. */
+  function closeGate() {
+    $("gate").classList.add("hidden");
+    document.body.style.overflow = "";
+  }
+
+  function renderBanner(c) {
+    if (c.quiet) {
+      return '<div class="quiet"><span class="tick">✓</span>' +
+             '<span>PhishShield không thấy dấu hiệu bất thường trong thư này.</span>' +
+             '<span class="tier">' + c.tier.text + "</span></div>";
+    }
+    var ev = c.evidence.map(function (t, i) {
+      return '<li><span class="k">' + (i + 1) + "</span><span>" + t + "</span></li>";
+    }).join("");
+    return '<div class="ban ' + c.level + '">' +
+      '<div class="ban-top">' +
+        '<span class="lamp">' + c.lamp + "</span>" +
+        '<div class="core"><div class="word">' + c.word + "</div>" +
+        '<div class="say">' + c.say + "</div></div>" +
+        '<div class="ctl">' +
+          '<button type="button" id="tog">' + (open ? "Ẩn bằng chứng" : "Xem bằng chứng · " + c.evidence.length) + "</button>" +
+        "</div>" +
+      "</div>" +
+      (open ? '<div class="ban-ev"><ol>' + ev + "</ol></div>" : "") +
+      '<div class="ban-foot"><span class="tier ' + c.tier.kind + '">' +
+        (c.tier.kind === "local" ? "TẠI CHỖ" : "CÓ GỌI AI") + "</span>" +
+        "<span>" + c.tier.text + "</span></div>" +
+    "</div>";
+  }
+
+  function paint(key) {
+    var c = CASES[key];
+    $("tabTitle").textContent = c.tab;
+    $("subject").textContent = c.subject;
+    $("fromName").textContent = c.name;
+    $("avatar").textContent = c.initials;
+    $("fromAddr").innerHTML = c.addr;
+    $("body").innerHTML = c.body;
+    $("inject").innerHTML = renderBanner(c);
+
+    var pip = $("extPip"), btn = $("extBtn");
+    btn.style.setProperty("--v", c.pipColor);
+    if (c.pip) { pip.textContent = c.pip; pip.classList.remove("hidden"); }
+    else { pip.classList.add("hidden"); }
+
+    var tog = $("tog");
+    if (tog) tog.addEventListener("click", function () { open = !open; paint(key); });
+
+    var bad = $("badLink");
+    if (bad) {
+      bad.addEventListener("click", function (e) {
+        e.preventDefault();
+        $("gateTarget").textContent = bad.textContent.trim();
+        $("gate").classList.remove("hidden");
+        $("tip").classList.remove("on");
+        document.body.style.overflow = "hidden";
+        $("gateBack").focus();
+      });
+      bad.addEventListener("mouseenter", function (e) {
+        var t = $("tip");
+        t.innerHTML = "<b>PhishShield chặn</b>Tên miền này nhái thương hiệu nội bộ. " +
+                      "Trang đích nhiều khả năng là cổng đăng nhập giả.";
+        t.classList.add("on");
+        var r = bad.getBoundingClientRect();
+        t.style.left = Math.min(r.left, window.innerWidth - 350) + "px";
+        t.style.top = (r.bottom + window.scrollY + 9) + "px";
+      });
+      bad.addEventListener("mouseleave", function () { $("tip").classList.remove("on"); });
+    }
+  }
+
+  /* case switcher */
+  var order = [["danger", "Nguy hiểm"], ["doubt", "Nghi vấn"], ["safe", "An toàn — im lặng"]];
+  order.forEach(function (pair, i) {
+    var b = document.createElement("button");
+    b.type = "button"; b.textContent = pair[1];
+    b.setAttribute("aria-pressed", i === 0 ? "true" : "false");
+    b.addEventListener("click", function () {
+      $("sw").querySelectorAll("button").forEach(function (x) { x.setAttribute("aria-pressed", "false"); });
+      b.setAttribute("aria-pressed", "true");
+      open = true;
+      closeGate();
+      paint(pair[0]);
+    });
+    $("sw").appendChild(b);
+  });
+
+  $("gateBack").addEventListener("click", closeGate);
+  $("gateGo").addEventListener("click", closeGate);
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") closeGate();
+  });
+
+  paint("danger");
+})();
+</script>
