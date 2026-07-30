@@ -1,0 +1,42 @@
+{
+  "company_domains": [
+    "vinai.io",
+    "vlearn.vn",
+    "vingroup.net",
+    "vin-university.edu.vn"
+  ],
+  "trusted_external_domains": [
+    "google.com",
+    "gmail.com",
+    "microsoft.com",
+    "outlook.com",
+    "office365.com",
+    "github.com",
+    "stackoverflow.com",
+    "slack.com",
+    "zoom.us",
+    "teams.microsoft.com"
+  ],
+  "high_risk_extensions": [
+    ".tk",
+    ".ml",
+    ".ga",
+    ".cf",
+    ".gq",
+    ".xyz",
+    ".top",
+    ".work",
+    ".club"
+  ],
+  "suspicious_keywords_in_url": [
+    "login-secure",
+    "verify-account",
+    "update-password",
+    "bank-confirm",
+    "security-alert",
+    "support-team",
+    "password-reset",
+    "free-gift",
+    "bonus-claim"
+  ]
+}
