@@ -329,6 +329,25 @@
   var qIndex = { danger: 0, doubt: 0, safe: 0 };
   var newCount = 0;
   var currentId = null;   // thư đang mở, để vẽ lại danh sách mà không mất highlight
+  var busy = false;       // đang có một lượt giao thư dở dang
+  var MAX_DELIVERED = 8;  // giữ hộp thư gọn, đừng để bấm nhiều thành danh sách vô tận
+
+  /* "Bất kỳ" dùng túi xáo, không dùng Math.random thuần.
+     Random thuần cho ra cụm: đo thật thấy 7 lượt giao thì 5 lượt rơi vào cùng
+     một loại, và có email lặp lại 3 lần — khán giả bấm "Bất kỳ" mấy lần liền
+     có thể không bao giờ thấy màu xanh, đúng thứ cần khoe nhất.
+     Túi xáo đảm bảo cứ 3 lượt liên tiếp là đủ cả ba mức. */
+  var bag = [];
+  function nextKind() {
+    if (!bag.length) {
+      bag = ["safe", "doubt", "danger"];
+      for (var i = bag.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var t = bag[i]; bag[i] = bag[j]; bag[j] = t;
+      }
+    }
+    return bag.pop();
+  }
 
   var listEl = document.getElementById("list");
   var readEl = document.getElementById("read");
@@ -356,26 +375,36 @@
   /* Thư mới "bay về": xuất hiện ở đầu danh sách rồi tự mở, để tiện ích phản ứng
      ngay trước mắt khán giả. Vì mở thư KHÔNG tải lại trang, đây cũng chính là
      đường mà MutationObserver của adapter phải bắt được. */
+  function setBusy(on) {
+    busy = on;
+    document.querySelectorAll("#deliver button").forEach(function (b) { b.disabled = on; });
+    document.getElementById("incoming").classList.toggle("hidden", !on);
+  }
+
   function deliver(kind) {
-    if (kind === "any") {
-      var kinds = ["safe", "doubt", "danger"];
-      kind = kinds[Math.floor(Math.random() * kinds.length)];
-    }
+    if (busy) return;                       // mỗi lần một lượt
+    if (kind === "any") kind = nextKind();
     var pool = QUEUE[kind];
     if (!pool || !pool.length) return;
 
     var tpl = pool[qIndex[kind] % pool.length];
     qIndex[kind]++;
 
-    var btns = document.querySelectorAll("#deliver button");
-    btns.forEach(function (b) { b.disabled = true; });
-    document.getElementById("incoming").classList.remove("hidden");
+    setBusy(true);
+
+    /* Chốt chặn: dù chuỗi timer bên dưới có chuyện gì, 3 giây là mở khoá.
+       Trước đây khoá nằm trọn trong hai setTimeout lồng nhau — chuỗi đó đứt một
+       lần (tab bị treo, trình duyệt bóp timer, một ngoại lệ) là nút chết vĩnh
+       viễn, giữa buổi demo thì chỉ còn nước F5. Đã gặp thật khi bấm dồn.
+       Gọi release() hai lần vô hại. */
+    var watchdog = setTimeout(function () { setBusy(false); }, 3000);
+    var release = function () { clearTimeout(watchdog); setBusy(false); };
 
     setTimeout(function () {
       newCount++;
       var mail = {
         id: "t-new-" + newCount,
-        unread: true, fresh: true, time: "Vừa xong",
+        unread: true, fresh: true, delivered: true, time: "Vừa xong",
         name: tpl.name, initials: tpl.initials, addr: tpl.addr,
         subject: tpl.subject, snippet: tpl.snippet,
         raw: "From: " + tpl.name + " <" + tpl.addr + ">\nSubject: " + tpl.subject,
@@ -383,7 +412,13 @@
       };
       MAIL.unshift(mail);
 
-      document.getElementById("incoming").classList.add("hidden");
+      // Giữ hộp thư gọn: bỏ bớt thư đã giao cũ nhất, không đụng 5 thư gốc.
+      var delivered = MAIL.filter(function (m) { return m.delivered; });
+      while (delivered.length > MAX_DELIVERED) {
+        var oldest = delivered.pop();
+        if (oldest.id === currentId) break;   // đừng xoá thư đang mở
+        MAIL.splice(MAIL.indexOf(oldest), 1);
+      }
 
       // Thư đến thì nằm CHƯA ĐỌC ở đầu danh sách, KHÔNG tự mở.
       // Thư thật cũng không tự bật ra, và quan trọng hơn: người trình bày cần
@@ -391,9 +426,7 @@
       // rồi chạy phân tích trước cả khi khán giả kịp nhìn.
       drawList(currentId);
 
-      setTimeout(function () {
-        btns.forEach(function (b) { b.disabled = false; });
-      }, 320);
+      setTimeout(release, 320);
     }, 780);
   }
 
