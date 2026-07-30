@@ -294,7 +294,20 @@
         snippet: "Hoá đơn của quý khách đã quá hạn thanh toán…",
         body: "<p>Kính gửi Quý khách,</p><p>Hoá đơn tháng 7 đã <b>quá hạn thanh toán</b>. " +
               "Đề nghị thanh toán ngay để tránh gián đoạn dịch vụ.</p>" +
-              '<p>Thanh toán tại: <a href="https://thanh-toan-hoadon.top/login-secure">https://thanh-toan-hoadon.top/login-secure</a></p>' }
+              '<p>Thanh toán tại: <a href="https://thanh-toan-hoadon.top/login-secure">https://thanh-toan-hoadon.top/login-secure</a></p>' },
+      { name: "Trung tâm An ninh", initials: "AN", addr: "security@vinai-security-check.tk",
+        subject: "Yêu cầu xác thực lại tài khoản VinAI",
+        snippet: "Tài khoản của bạn cần xác thực lại trong 24 giờ…",
+        body: "<p>Kính gửi người dùng,</p><p>Hệ thống yêu cầu bạn <b>xác thực lại tài khoản</b> " +
+              "trong vòng 24 giờ để tiếp tục sử dụng dịch vụ.</p>" +
+              '<p>Truy cập: <a href="https://vinai-security-check.tk/verify-account">https://vinai-security-check.tk/verify-account</a></p>' +
+              "<p>Trung tâm An ninh</p>" },
+      { name: "Cục Thuế", initials: "CT", addr: "thongbao@tra-cuu-thue.ml",
+        subject: "Thông báo truy thu thuế thu nhập cá nhân",
+        snippet: "Bạn có một khoản truy thu chưa nộp…",
+        body: "<p>Kính gửi Quý ông/bà,</p><p>Hệ thống ghi nhận bạn có một khoản " +
+              "<b>truy thu thuế chưa nộp</b>. Vui lòng tra cứu và nộp trong 03 ngày làm việc.</p>" +
+              '<p>Tra cứu tại: <a href="https://tra-cuu-thue.ml/login-secure">https://tra-cuu-thue.ml/login-secure</a></p>' }
     ],
     doubt: [
       { name: "Trần Quốc Bảo", initials: "TB", addr: "bao.tran@doitac-thietke.com",
@@ -308,7 +321,21 @@
         snippet: "Bên mình có một vị trí phù hợp với hồ sơ của bạn…",
         body: "<p>Chào bạn,</p><p>Bên mình có một vị trí phù hợp với hồ sơ của bạn.</p>" +
               '<p>Mô tả công việc: <a href="https://tuyendung-online.net/vi-tri/1204">https://tuyendung-online.net/vi-tri/1204</a></p>' +
-              "<p>Trân trọng.</p>" }
+              "<p>Trân trọng.</p>" },
+      { name: "Ban Tổ chức", initials: "BT", addr: "support@khaosat-nhanvien.org",
+        subject: "Khảo sát mức độ hài lòng nhân viên 2026",
+        snippet: "Mời anh chị dành 3 phút hoàn thành khảo sát…",
+        body: "<p>Kính gửi anh/chị,</p><p>Mời anh/chị dành 3 phút hoàn thành khảo sát " +
+              "mức độ hài lòng năm 2026.</p>" +
+              '<p><a href="https://khaosat-nhanvien.org/form/2026">https://khaosat-nhanvien.org/form/2026</a></p>' +
+              "<p>Cảm ơn anh/chị.</p>" },
+      { name: "Tech Summit VN", initials: "TS", addr: "info@techsummit-vn.info",
+        subject: "Thư mời tham dự hội thảo công nghệ",
+        snippet: "Trân trọng mời anh/chị tham dự hội thảo…",
+        body: "<p>Kính gửi anh/chị,</p><p>Trân trọng mời anh/chị tham dự hội thảo công nghệ " +
+              "thường niên.</p>" +
+              '<p>Đăng ký tại: <a href="https://techsummit-vn.info/dang-ky">https://techsummit-vn.info/dang-ky</a></p>' +
+              "<p>Ban Tổ chức</p>" }
     ],
     safe: [
       { name: "VLearn", initials: "VL", addr: "no-reply@vlearn.vn",
@@ -323,7 +350,21 @@
         body: "<p>Chào các anh chị,</p><p>Công ty thông báo lịch nghỉ lễ Quốc khánh. " +
               "Anh chị sắp xếp công việc phù hợp.</p>" +
               '<p>Chi tiết: <a href="https://vingroup.net/thong-bao/nghi-le">https://vingroup.net/thong-bao/nghi-le</a></p>' +
-              "<p>Phòng Truyền thông</p>" }
+              "<p>Phòng Truyền thông</p>" },
+      { name: "Phòng Đào tạo", initials: "ĐT", addr: "daotao@vin-university.edu.vn",
+        subject: "Lịch thi cuối kỳ đã công bố",
+        snippet: "Lịch thi cuối kỳ đã được công bố trên cổng đào tạo…",
+        body: "<p>Chào các bạn,</p><p>Lịch thi cuối kỳ đã được công bố trên cổng đào tạo.</p>" +
+              '<p>Xem tại: <a href="https://vin-university.edu.vn/lich-thi">https://vin-university.edu.vn/lich-thi</a></p>' +
+              "<p>Phòng Đào tạo</p>" },
+      // Cố ý dùng github.com: chứng minh danh sách trusted_external_domains có
+      // tác dụng — tên miền ngoài công ty nhưng vẫn được cho qua, không báo bừa.
+      { name: "Nhóm Kỹ thuật", initials: "KT", addr: "no-reply@vinai.io",
+        subject: "Bạn được thêm vào repository",
+        snippet: "Bạn vừa được thêm vào repository của nhóm…",
+        body: "<p>Chào bạn,</p><p>Bạn vừa được thêm vào repository của nhóm.</p>" +
+              '<p><a href="https://github.com/vinai/phishshield">https://github.com/vinai/phishshield</a></p>' +
+              "<p>Nhóm Kỹ thuật</p>" }
     ]
   };
   var qIndex = { danger: 0, doubt: 0, safe: 0 };
