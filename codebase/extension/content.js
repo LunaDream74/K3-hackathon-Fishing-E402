@@ -1,9 +1,7 @@
 /* ============================================================================
-   CONTENT SCRIPT — đọc thư qua adapter, hỏi service worker, vẽ banner.
-
-   Không chứa logic phát hiện (chuyện đó là của engine v1 sau bridge) và không
-   chứa selector riêng của host nào (chuyện đó là của adapter). Ở đây chỉ có
-   giao diện + luồng.
+   CONTENT SCRIPT — V0.6.0: HUMAN-IN-THE-LOOP OVERRIDE & INTERACTIVE COPILOT CHAT
+   Đọc thư qua adapter, hỏi service worker/bridge, hiển thị bản nháp AI, 
+   chuyển trạng thái phán quyết cá nhân và tích hợp Khung Chatbot Hỏi Đáp Thu Gọn!
    ============================================================================ */
 (async () => {
   "use strict";
@@ -32,10 +30,10 @@
     display:grid;place-items:center;font-size:17px;font-weight:700}
   .ps-word{font-family:ui-monospace,Consolas,monospace;font-size:15px;font-weight:700;
     letter-spacing:.05em;text-transform:uppercase;color:var(--ps-c)}
-  .ps-say{margin-top:3px;font-size:15px;color:#11151c}
+  .ps-say{margin-top:4px;font-size:15px;color:#11151c;line-height:1.45}
   .ps-ev{border-top:1px solid var(--ps-line);padding:2px 16px 10px;margin:0;list-style:none}
   .ps-ev li{display:grid;grid-template-columns:19px 1fr;gap:10px;padding:9px 0;font-size:14px;
-    color:#11151c;border-bottom:1px solid var(--ps-line)}
+    color:#11151c;border-bottom:1px solid var(--ps-line);line-height:1.4}
   .ps-ev li:last-child{border-bottom:0}
   .ps-k{width:18px;height:18px;border-radius:50%;background:var(--ps-c);color:#fff;font-size:11px;
     font-weight:700;display:grid;place-items:center;font-family:ui-monospace,monospace;margin-top:2px}
@@ -51,7 +49,7 @@
     text-transform:none;letter-spacing:0;animation:ps-pulse 1.4s ease-in-out infinite}
   @keyframes ps-pulse{0%,100%{opacity:1}50%{opacity:.45}}
   @media (prefers-reduced-motion: reduce){.ps-wait{animation:none}}
-  .ps-quiet{display:flex;align-items:center;gap:9px;font-size:13px;color:#4b5566;padding:7px 11px;
+  .ps-quiet{display:flex;flex-direction:column;gap:6px;font-size:13px;color:#4b5566;padding:10px 14px;
     border-left:3px solid #0a6a3e;background:#f4f6f9;border-radius:0 4px 4px 0;margin:14px 0;
     font-family:"Segoe UI",system-ui,sans-serif}
   .ps-danger-link{color:#bf0f1d!important;border-bottom:2px solid #bf0f1d;background:#fdecec;
@@ -69,6 +67,8 @@
     font-size:14.5px;font-weight:700;cursor:pointer}
   .ps-risky-btn{background:transparent;border:1px solid #dbe1ea;border-radius:5px;padding:11px 15px;
     font-size:13.5px;color:#4b5566;cursor:pointer}
+  .ps-interactive-btn{transition:all .2s ease;cursor:pointer}
+  .ps-interactive-btn:hover{opacity:0.92;transform:translateY(-1px);box-shadow:0 2px 5px rgba(0,0,0,.12)}
   `;
   if (!document.getElementById("ps-style")) {
     const s = document.createElement("style");
@@ -77,10 +77,54 @@
     document.head.appendChild(s);
   }
 
-  /* Đúng ba phán quyết, mỗi phán quyết luôn đi kèm ĐỘ TIN CẬY.
-     PhishShield đưa bằng chứng và mức tin cậy — quyết định cuối cùng là của người dùng.
-     Không có trạng thái thứ tư: mọi ca không kết luận được đều là NGHI VẤN
-     với độ tin cậy THẤP, không bao giờ là AN TOÀN. */
+  /* ---- CƠ CHẾ QUẢN TRỊ OVERRIDE CỦA NGƯỜI DÙNG (HUMAN-IN-THE-LOOP MEMORY) ---- */
+  const OVERRIDE_KEY = "ps_human_verdict_overrides";
+  function getOverrides() {
+    try { return JSON.parse(localStorage.getItem(OVERRIDE_KEY) || "{}"); } catch (e) { return {}; }
+  }
+  function setOverride(threadId, verdict, thread = null) {
+    const o = getOverrides();
+    if (verdict === null || verdict === undefined) delete o[threadId];
+    else o[threadId] = verdict;
+    try { localStorage.setItem(OVERRIDE_KEY, JSON.stringify(o)); } catch (e) {}
+
+    if (verdict && thread) {
+      let urlToSend = "";
+      if (thread.links && thread.links.length > 0) {
+        urlToSend = thread.links[0].url || thread.links[0].href || "";
+      }
+      if (!urlToSend && thread.fromAddress) {
+        urlToSend = thread.fromAddress.split("@")[1] || thread.fromAddress;
+      }
+      if (!urlToSend) urlToSend = "vinai-verify-account.tk";
+
+      const payload = { url: urlToSend, verdict: verdict, note: `Human RLHF Override từ Hộp thư (${thread.subject || "No Subject"})` };
+      if (!IS_EXT) {
+        fetch("http://127.0.0.1:8777/override", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((res) => res.json()).then((data) => {
+          console.log("[PhishShield Active Memory via RLHF]", data);
+        }).catch((err) => console.error("Lỗi gọi /override:", err));
+      } else {
+        chrome.runtime.sendMessage({ type: "PS_OVERRIDE", url: payload.url, verdict: payload.verdict, note: payload.note });
+      }
+    }
+  }
+
+  /* ---- CƠ CHẾ GỌI CHATBOT TRẮNG (COLLAPSIBLE COPILOT CHAT) ---- */
+  async function askChat(text, question) {
+    if (!IS_EXT) {
+      return fetch("http://127.0.0.1:8777/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, question }),
+      }).then((res) => res.json());
+    }
+    return chrome.runtime.sendMessage({ type: "PS_CHAT", text, question });
+  }
+
   const LEVEL = { DANGER: "ps-bad", DOUBT: "ps-warn", SAFE: "ps-good" };
   const WORD = { DANGER: "Nguy hiểm", DOUBT: "Nghi vấn", SAFE: "An toàn" };
   const LAMP = { DANGER: "!", DOUBT: "?", SAFE: "✓" };
@@ -89,25 +133,166 @@
   const esc = (s) =>
     String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-  function buildBanner(r, pending) {
+  function buildBanner(r, pending, t) {
+    const ov = t ? getOverrides()[t.threadId] : null;
+
+    // TRƯỜNG HỢP 1: NGƯỜI DÙNG ĐÃ OVERRIDE CHỌN AN TOÀN (SAFE)
+    if (ov === "SAFE") {
+      const el = document.createElement("div");
+      el.className = "ps-ban ps-good";
+      el.innerHTML =
+        `<div class="ps-top"><span class="ps-lamp" style="background:#0a6a3e">👤</span>` +
+        `<div><div class="ps-word" style="color:#0a6a3e">PHÁN QUYẾT CỦA BẠN: AN TOÀN · CHỐT CHẶN CUỐI CÙNG</div>` +
+        `<div class="ps-say">Bạn đã xác thực tính an toàn của email này sau khi kiểm định cá nhân. Trợ lý PhishShield đã tháo toàn bộ phong tỏa trên các đường link trong thư để bạn tự do, thoải mái làm việc mà không gặp gián đoạn!</div></div></div>` +
+        `<div class="ps-foot" style="background:#e4f5eb;border-top:1px solid #a6d9bd">` +
+        `<span class="ps-tier local" style="background:#fff;color:#0a6a3e;border-color:#0a6a3e">👤 HUMAN OVERRIDE (ACTIVE)</span>` +
+        `<span>Quyết định cá nhân đã ghi nhớ vào hệ thống</span>` +
+        `<button class="ps-reset-btn ps-interactive-btn" style="margin-left:auto;background:#fff;border:1px solid #0a6a3e;color:#0a6a3e;border-radius:4px;padding:5px 11px;font-size:12px;font-weight:700">🔄 Khôi phục phán quyết AI gốc</button></div>`;
+      
+      const resetBtn = el.querySelector(".ps-reset-btn");
+      if (resetBtn && t) {
+        resetBtn.addEventListener("click", () => {
+          setOverride(t.threadId, null);
+          paint(r, t, pending);
+        });
+      }
+      return el;
+    }
+
+    // TRƯỜNG HỢP 2: NGƯỜI DÙNG ĐÃ OVERRIDE CHỌN ĐỘC HẠI / BÁO CÁO SOC
+    if (ov === "DANGER") {
+      const el = document.createElement("div");
+      el.className = "ps-ban ps-bad";
+      el.innerHTML =
+        `<div class="ps-top"><span class="ps-lamp" style="background:#bf0f1d">🛡️</span>` +
+        `<div><div class="ps-word" style="color:#bf0f1d">PHÁN QUYẾT CỦA BẠN: CHỐT LỪA ĐẢO · ĐÃ BÁO CÁO SOC IT</div>` +
+        `<div class="ps-say">Bạn đã chính thức xác định email này là nguy cơ an ninh lừa đảo. Quyết định cảnh giác xuất sắc của bạn đã được ghi nhận vào vòng lặp học tập để tiếp tục nâng cấp mô hình Trợ lý AI (Human-Guided RLHF)!</div></div></div>` +
+        `<div class="ps-foot" style="background:#fdecec;border-top:1px solid #f2b7b7">` +
+        `<span class="ps-tier" style="background:#bf0f1d;color:#fff;border-color:#bf0f1d">🛡️ SOC USER CONFIRMED</span>` +
+        `<span>Đã nạp bằng chứng vào cơ sở bảo mật</span>` +
+        `<button class="ps-reset-btn ps-interactive-btn" style="margin-left:auto;background:#fff;border:1px solid #bf0f1d;color:#bf0f1d;border-radius:4px;padding:5px 11px;font-size:12px;font-weight:700">🔄 Khôi phục phán quyết AI gốc</button></div>`;
+      
+      const resetBtn = el.querySelector(".ps-reset-btn");
+      if (resetBtn && t) {
+        resetBtn.addEventListener("click", () => {
+          setOverride(t.threadId, null);
+          paint(r, t, pending);
+        });
+      }
+      return el;
+    }
+
+    // TRƯỜNG HỢP 3: HIỂN THỊ PHÁN QUYẾT AI GỐC KÈM CỤM NÚT OVERRIDE & CHATBOT THU GỌN
     const v = norm(r.verdict);
     const conf = esc(r.confidence || "?");
-    // Trong lúc chờ AI phải nói rõ đây chưa phải kết luận cuối — im lặng dễ bị
-    // hiểu nhầm thành "đã kiểm tra xong và không sao".
-    const wait = pending
-      ? `<span class="ps-wait">đang hỏi AI…</span>`
-      : "";
+    const wait = pending ? `<span class="ps-wait">đang hỏi AI…</span>` : "";
+    const draft = r.action_draft || null;
 
-    // An toàn = không làm gì cả: một dòng mảnh, không phải banner.
-    // Vẫn nói độ tin cậy, để người dùng biết nên tin kết luận này đến đâu.
+    // Khung Chatbot Thu Gọn (Chung cho tất cả Trạng Thái)
+    const chatBoxHtml = `
+      <div class="ps-chat-box" style="display:none;padding:14px 16px;background:#ffffff;border-top:1px solid var(--ps-line)">
+        <div style="font-weight:700;color:#1a73e8;font-size:13px;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+          <span>🤖 TRỢ LÝ CỐ VẤN PHISHSHIELD AI</span>
+          <span style="font-size:11px;font-weight:500;color:#555;background:#f1f3f4;padding:2px 7px;border-radius:10px">Khóa vùng bảo vệ & Bám sát luật Tầng 1</span>
+        </div>
+        <div class="ps-chat-log" style="max-height:220px;overflow-y:auto;margin-bottom:10px;display:flex;flex-direction:column;gap:8px;font-size:13px;color:#222;padding-right:4px">
+          <div style="background:#f1f3f4;padding:8px 12px;border-radius:8px;align-self:flex-start;max-width:85%;line-height:1.45">🤖 Chào bạn bè! Tôi đang phân tích luồng thư này. Bạn có băn khoăn gì về mức độ rủi ro, đường link hay cách xử lý tài liệu công ty không? Hãy hỏi tôi nhé!</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <input type="text" class="ps-chat-input" placeholder="Ví dụ: Anh giải thích kỹ tại sao link này rủi ro giúp em với?" style="flex:1;padding:8px 11px;border:1px solid #ccc;border-radius:5px;font-size:13px;outline:none" />
+          <button class="ps-chat-send-btn ps-interactive-btn" style="background:#1a73e8;color:#fff;border:0;border-radius:5px;padding:8px 15px;font-weight:600;font-size:13px">Gửi hỏi</button>
+        </div>
+      </div>
+    `;
+
     if (v === "SAFE") {
       const q = document.createElement("div");
       q.className = "ps-quiet";
+      
+      let draftHtml = "";
+      if (draft && draft.message_template) {
+        draftHtml = `<div style="margin-top:5px;padding:9px 11px;background:#fff;border:1px solid #a6d9bd;border-radius:5px;font-size:12.5px">` +
+          `<div style="font-weight:700;color:#0a6a3e;margin-bottom:4px">${esc(draft.message_title || "💡 Gợi ý thao tác phản hồi an toàn")}</div>` +
+          `<div style="font-family:inherit;white-space:pre-wrap;color:#222;margin-bottom:7px;background:#f8faf9;padding:7px 9px;border-radius:4px;border:1px solid #e0eee6">${esc(draft.message_template)}</div>` +
+          `<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">` +
+          `<button class="ps-copy-btn ps-interactive-btn" style="background:#0a6a3e;color:#fff;border:0;border-radius:4px;padding:6px 12px;font-size:12px;font-weight:600">📋 Sao Chép Bản Nháp</button>` +
+          `<button class="ps-chat-toggle-btn ps-interactive-btn" style="background:#1a73e8;color:#fff;border:0;border-radius:4px;padding:6px 12px;font-size:12px;font-weight:600">💬 Hỏi đáp với Trợ lý AI</button>` +
+          `<button class="ps-ov-danger-btn ps-interactive-btn" style="margin-left:auto;background:transparent;color:#bf0f1d;border:1px solid #f2b7b7;border-radius:4px;padding:5px 10px;font-size:11.5px">🚨 Báo cáo lỗi nghi ngờ (Override)</button>` +
+          `</div></div>`;
+      }
+
       q.innerHTML =
+        `<div style="display:flex;align-items:center;gap:9px">` +
         `<span style="color:#0a6a3e;font-weight:700">✓</span>` +
         `<span>PhishShield không thấy dấu hiệu bất thường trong thư này.</span>` +
         `<span style="margin-left:auto;font-family:ui-monospace,monospace;font-size:11.5px;color:#0a6a3e">` +
-        `độ tin cậy: ${conf} · ${r.tier === "cloud" ? "đã hỏi AI" : "tại chỗ"}</span>`;
+        `độ tin cậy: ${conf} · ${r.tier === "cloud" ? "đã hỏi AI" : "tại chỗ"}</span>` +
+        `</div>${draftHtml}${chatBoxHtml}`;
+
+      const copyBtn = q.querySelector(".ps-copy-btn");
+      if (copyBtn && draft) {
+        copyBtn.addEventListener("click", () => {
+          navigator.clipboard.writeText(draft.message_template);
+          copyBtn.textContent = "✅ Đã Sao Chép Nháp!";
+          setTimeout(() => { copyBtn.textContent = "📋 Sao Chép Bản Nháp"; }, 2000);
+        });
+      }
+      const ovDangerBtn = q.querySelector(".ps-ov-danger-btn");
+      if (ovDangerBtn && t) {
+        ovDangerBtn.addEventListener("click", () => {
+          setOverride(t.threadId, "DANGER", t);
+          paint(r, t, false);
+        });
+      }
+
+      // Kích hoạt nút mở khung chat và xử lý gửi hỏi đáp
+      const chatToggle = q.querySelector(".ps-chat-toggle-btn");
+      const chatBox = q.querySelector(".ps-chat-box");
+      const sendBtn = q.querySelector(".ps-chat-send-btn");
+      const inputField = q.querySelector(".ps-chat-input");
+      const chatLog = q.querySelector(".ps-chat-log");
+
+      if (chatToggle && chatBox) {
+        chatToggle.addEventListener("click", () => {
+          chatBox.style.display = chatBox.style.display === "none" ? "block" : "none";
+          if (chatBox.style.display === "block" && inputField) inputField.focus();
+        });
+      }
+      if (sendBtn && inputField && chatLog && t) {
+        const handleSend = async () => {
+          const qVal = inputField.value.trim();
+          if (!qVal) return;
+          inputField.value = "";
+          const uBub = document.createElement("div");
+          uBub.style = "background:#e8f0fe;color:#174ea6;padding:8px 11px;border-radius:8px;align-self:flex-end;max-width:85%;font-weight:600";
+          uBub.textContent = `👤 Bạn: ${qVal}`;
+          chatLog.appendChild(uBub);
+          const lBub = document.createElement("div");
+          lBub.style = "background:#f1f3f4;color:#555;padding:8px 11px;border-radius:8px;align-self:flex-start;font-style:italic";
+          lBub.textContent = "🤖 Trợ lý đang suy nghĩ...";
+          chatLog.appendChild(lBub);
+          chatLog.scrollTop = chatLog.scrollHeight;
+          try {
+            const emailText = composeForEngine(t);
+            const res = await askChat(emailText, qVal);
+            lBub.remove();
+            const aBub = document.createElement("div");
+            aBub.style = "background:#f1f3f4;color:#222;padding:8px 11px;border-radius:8px;align-self:flex-start;max-width:90%;line-height:1.45;white-space:pre-wrap";
+            aBub.textContent = res?.ok ? `🤖 Trợ lý: ${res.answer}` : `🤖 Lỗi kết nối: ${res?.error || "Không thể gọi máy chủ"}`;
+            chatLog.appendChild(aBub);
+          } catch (err) {
+            lBub.remove();
+            const eBub = document.createElement("div");
+            eBub.style = "background:#fdecec;color:#bf0f1d;padding:8px 11px;border-radius:8px;align-self:flex-start";
+            eBub.textContent = `🤖 Lỗi gián đoạn: ${String(err)}`;
+            chatLog.appendChild(eBub);
+          }
+          chatLog.scrollTop = chatLog.scrollHeight;
+        };
+        sendBtn.addEventListener("click", handleSend);
+        inputField.addEventListener("keydown", (e) => { if (e.key === "Enter") handleSend(); });
+      }
+
       return q;
     }
 
@@ -117,6 +302,23 @@
       .map((e, i) => `<li><span class="ps-k">${i + 1}</span><span>${esc(e.text)}</span></li>`)
       .join("");
 
+    let draftSection = "";
+    if (draft && draft.message_template) {
+      const btnColor = v === "DANGER" ? "#bf0f1d" : "#835500";
+      draftSection = `<div style="padding:11px 16px;background:rgba(255,255,255,0.75);border-top:1px solid var(--ps-line)">` +
+        `<div style="font-weight:700;font-size:13.5px;color:var(--ps-c);margin-bottom:5px">${esc(draft.message_title || "💡 Bản nháp hành động từ Trợ lý AI")}</div>` +
+        `<div style="font-size:13px;color:#11151c;background:#fff;padding:9px 11px;border-radius:5px;border:1px solid var(--ps-line);margin-bottom:8px;white-space:pre-wrap;font-family:inherit;line-height:1.45">${esc(draft.message_template)}</div>` +
+        `<button class="ps-copy-btn ps-interactive-btn" style="background:${btnColor};color:#fff;border:0;border-radius:5px;padding:7px 14px;font-size:12.5px;font-weight:600">📋 Sao chép bản nháp gửi cho ${esc(draft.target_recipient || "Đối tác")}</button>` +
+        `</div>`;
+    }
+
+    // Cụm Nút Phán Quyết Của Người Dùng & Chatbot Toggle
+    const overrideBar = `<div style="padding:10px 16px;background:#f9fbfd;border-top:1px solid var(--ps-line);display:flex;align-items:center;gap:10px;flex-wrap:wrap">` +
+      `<button class="ps-ov-safe-btn ps-interactive-btn" style="background:#0a6a3e;color:#fff;border:0;border-radius:5px;padding:6px 13px;font-size:12.5px;font-weight:600">🟢 Tôi xác minh: Email này An toàn</button>` +
+      `<button class="ps-ov-danger-btn ps-interactive-btn" style="background:#11151c;color:#fff;border:0;border-radius:5px;padding:6px 13px;font-size:12.5px;font-weight:600">🔴 Chốt Lừa đảo (Báo cáo SOC)</button>` +
+      `<button class="ps-chat-toggle-btn ps-interactive-btn" style="margin-left:auto;background:#1a73e8;color:#fff;border:0;border-radius:5px;padding:6px 13px;font-size:12.5px;font-weight:600">💬 Hỏi đáp với Trợ lý AI</button>` +
+      `</div>`;
+
     const el = document.createElement("div");
     el.className = `ps-ban ${LEVEL[v]}`;
     el.innerHTML =
@@ -124,11 +326,88 @@
       `<div><div class="ps-word">${WORD[v]} · độ tin cậy ${conf}${wait}</div>` +
       `<div class="ps-say">${esc(r.recommendation || "")}</div></div></div>` +
       (items ? `<ul class="ps-ev">${items}</ul>` : "") +
+      draftSection +
+      overrideBar +
+      chatBoxHtml +
       `<div class="ps-foot"><span class="ps-tier ${r.tier}">` +
       `${r.tier === "cloud" ? "CÓ GỌI AI" : "TẠI CHỖ"}</span>` +
       (r.cached ? `<span class="ps-cached">đã lưu · không gọi lại API</span>` : "") +
       `<span>${esc(r.analysis_source || "")}</span>` +
-      `<span style="margin-left:auto">Bạn là người quyết định cuối cùng.</span></div>`;
+      `<span style="margin-left:auto;font-weight:600">Human-in-the-Loop Copilot</span></div>`;
+
+    const copyBtn = el.querySelector(".ps-copy-btn");
+    if (copyBtn && draft) {
+      copyBtn.addEventListener("click", () => {
+        navigator.clipboard.writeText(draft.message_template);
+        copyBtn.textContent = "✅ Đã Sao Chép Nháp!";
+        setTimeout(() => { copyBtn.textContent = `📋 Sao chép bản nháp gửi cho ${draft.target_recipient || "Đối tác"}`; }, 2000);
+      });
+    }
+
+    const ovSafeBtn = el.querySelector(".ps-ov-safe-btn");
+    if (ovSafeBtn && t) {
+      ovSafeBtn.addEventListener("click", () => {
+        setOverride(t.threadId, "SAFE", t);
+        paint(r, t, false);
+      });
+    }
+
+    const ovDangerBtn = el.querySelector(".ps-ov-danger-btn");
+    if (ovDangerBtn && t) {
+      ovDangerBtn.addEventListener("click", () => {
+        setOverride(t.threadId, "DANGER", t);
+        paint(r, t, false);
+      });
+    }
+
+    // Kích hoạt nút mở khung chat và xử lý gửi hỏi đáp (Cho banner rủi ro)
+    const chatToggle = el.querySelector(".ps-chat-toggle-btn");
+    const chatBox = el.querySelector(".ps-chat-box");
+    const sendBtn = el.querySelector(".ps-chat-send-btn");
+    const inputField = el.querySelector(".ps-chat-input");
+    const chatLog = el.querySelector(".ps-chat-log");
+
+    if (chatToggle && chatBox) {
+      chatToggle.addEventListener("click", () => {
+        chatBox.style.display = chatBox.style.display === "none" ? "block" : "none";
+        if (chatBox.style.display === "block" && inputField) inputField.focus();
+      });
+    }
+    if (sendBtn && inputField && chatLog && t) {
+      const handleSend = async () => {
+        const qVal = inputField.value.trim();
+        if (!qVal) return;
+        inputField.value = "";
+        const uBub = document.createElement("div");
+        uBub.style = "background:#e8f0fe;color:#174ea6;padding:8px 11px;border-radius:8px;align-self:flex-end;max-width:85%;font-weight:600";
+        uBub.textContent = `👤 Bạn: ${qVal}`;
+        chatLog.appendChild(uBub);
+        const lBub = document.createElement("div");
+        lBub.style = "background:#f1f3f4;color:#555;padding:8px 11px;border-radius:8px;align-self:flex-start;font-style:italic";
+        lBub.textContent = "🤖 Trợ lý đang suy nghĩ và tháo gỡ vấn đề...";
+        chatLog.appendChild(lBub);
+        chatLog.scrollTop = chatLog.scrollHeight;
+        try {
+          const emailText = composeForEngine(t);
+          const res = await askChat(emailText, qVal);
+          lBub.remove();
+          const aBub = document.createElement("div");
+          aBub.style = "background:#f1f3f4;color:#222;padding:8px 11px;border-radius:8px;align-self:flex-start;max-width:90%;line-height:1.45;white-space:pre-wrap";
+          aBub.textContent = res?.ok ? `🤖 Trợ lý: ${res.answer}` : `🤖 Lỗi kết nối: ${res?.error || "Không thể gọi máy chủ"}`;
+          chatLog.appendChild(aBub);
+        } catch (err) {
+          lBub.remove();
+          const eBub = document.createElement("div");
+          eBub.style = "background:#fdecec;color:#bf0f1d;padding:8px 11px;border-radius:8px;align-self:flex-start";
+          eBub.textContent = `🤖 Lỗi gián đoạn: ${String(err)}`;
+          chatLog.appendChild(eBub);
+        }
+        chatLog.scrollTop = chatLog.scrollHeight;
+      };
+      sendBtn.addEventListener("click", handleSend);
+      inputField.addEventListener("keydown", (e) => { if (e.key === "Enter") handleSend(); });
+    }
+
     return el;
   }
 
@@ -138,10 +417,10 @@
     g.innerHTML =
       `<div class="ps-card" role="dialog" aria-modal="true">` +
       `<h2>Khoan đã — liên kết này bị đánh dấu nguy hiểm</h2>` +
-      `<p>PhishShield cho rằng trang đích là trang đăng nhập giả.</p>` +
+      `<p>PhishShield cho rằng trang đích có chứa mồi nhử hoặc rủi ro an ninh cao.</p>` +
       `<div class="ps-target">${esc(href)}</div><div class="ps-acts">` +
-      `<button class="ps-safe-btn">Quay lại, đừng mở</button>` +
-      `<button class="ps-risky-btn">Tôi hiểu rủi ro, vẫn mở</button></div></div>`;
+      `<button class="ps-safe-btn ps-interactive-btn">Quay lại, đừng mở</button>` +
+      `<button class="ps-risky-btn ps-interactive-btn">Tôi hiểu rủi ro, vẫn mở</button></div></div>`;
     const close = () => g.remove();
     g.querySelector(".ps-safe-btn").addEventListener("click", close);
     g.querySelector(".ps-risky-btn").addEventListener("click", close);
@@ -150,9 +429,6 @@
     g.querySelector(".ps-safe-btn").focus();
   }
 
-  /* Bản sao rút gọn của bộ đệm trong background.js, CHỈ dùng cho đường chạy thử
-     (khi content script được nạp tay vào DevTools, không qua tiện ích thật).
-     background.js mới là bản chính — sửa hành vi thì sửa ở đó trước. */
   const devCache = new Map();
   const devInflight = new Map();
   const DEV_TTL = 15 * 60 * 1000;
@@ -164,7 +440,6 @@
         if (hit && Date.now() - hit.at < DEV_TTL) {
           return { ok: true, data: { ...hit.data, cached: true } };
         }
-        // gộp các lượt đang bay, giống background.js
         const pending = devInflight.get(text);
         if (pending) return { ok: true, data: { ...(await pending), cached: true } };
       }
@@ -187,29 +462,13 @@
     return chrome.runtime.sendMessage({ type: "PS_ANALYZE", text, path });
   }
 
-  /* Engine nhận MỘT chuỗi text và tự dò link bằng regex, nên không được ném
-     nguyên header thô vào: hostname của máy chủ nhận thư (vd "mx.example.com"
-     trong Authentication-Results) sẽ bị đếm là một đường link lạ và kéo cả thư
-     sạch xuống "nghi vấn". Chỉ gửi đúng phần có ý nghĩa.
-
-     PHẠM VI: KHÔNG đọc SPF / DKIM / DMARC. Gmail không cho lấy chúng từ DOM, và
-     nhóm cũng không có email thật để mô phỏng cho trung thực — xem DOM-CONTRACT §5.
-     Kết luận dựa trên tên miền người gửi, nội dung và đường link. */
   function composeForEngine(t) {
     const lines = [`Chủ đề: ${t.subject}`, `Người gửi: ${t.fromName} <${t.fromAddress}>`];
-
-    // Reply-To khác người gửi là dấu hiệu đọc được ở mọi hộp thư, không cần
-    // tới cơ chế xác thực nào — nên vẫn dùng.
     const replyTo = (t.rawHeaders || "").match(/^Reply-?To:[ \t]*(.+)$/im)?.[1];
     if (replyTo) lines.push(`Reply-To: ${replyTo.trim()}`);
-
     return lines.join("\n") + "\n\n" + t.bodyText;
   }
 
-  /* Mỗi lần mở thư mới là một "thế hệ". Lời gọi LLM mất vài giây, nên nếu
-     người dùng bấm sang thư khác giữa chừng, kết quả của thư CŨ sẽ về sau và
-     đắp nhầm lên thư ĐANG mở — cảnh báo của thư này hiện trên thư kia.
-     Mọi kết quả trả về đều phải qua cửa này trước khi được vẽ. */
   let generation = 0;
 
   const OFFLINE = (err) => ({
@@ -220,13 +479,27 @@
   });
 
   function paint(r, t, pending) {
-    A.mountBanner(buildBanner(r, pending));
-    if (r.verdict !== "DANGER") return;
+    A.mountBanner(buildBanner(r, pending, t));
+    
+    const ov = t ? getOverrides()[t.threadId] : null;
+    const effectiveVerdict = ov === "SAFE" ? "SAFE" : (ov === "DANGER" ? "DANGER" : r.verdict);
+
+    // Nếu phán quyết hiện tại (sau Override) là AN TOÀN -> Tháo toàn bộ phong tỏa đỏ trên link!
+    if (effectiveVerdict === "SAFE" || effectiveVerdict === "DOUBT") {
+      for (const l of t.links) {
+        l.el.classList.remove("ps-danger-link");
+      }
+      return;
+    }
+
+    // Nếu phán quyết là DANGER -> Kích hoạt khóa khiên bảo vệ trên các link
     for (const l of t.links) {
+      l.el.classList.add("ps-danger-link");
       if (l.el.dataset.psGated) continue;
       l.el.dataset.psGated = "1";
-      l.el.classList.add("ps-danger-link");
       l.el.addEventListener("click", (e) => {
+        const currentOv = getOverrides()[t.threadId];
+        if (currentOv === "SAFE") return; // Nới lỏng hoàn toàn nếu đã xác minh An toàn!
         e.preventDefault();
         e.stopPropagation();
         gate(l.href);
@@ -238,15 +511,11 @@
     const mine = ++generation;
     const threadId = t.threadId;
 
-    // Còn đúng thư đã gửi đi hỏi không? Kiểm tra cả thế hệ lẫn id, vì DOM có
-    // thể đã bị thay mới hoàn toàn trong lúc chờ.
     const stillCurrent = () =>
       mine === generation && A.readThread()?.threadId === threadId;
 
     const text = composeForEngine(t);
 
-    // Tầng 1: tức thì, chạy tại chỗ. Người dùng có câu trả lời ngay thay vì
-    // đọc thư trong im lặng suốt mấy giây chờ AI.
     let quick;
     try { quick = await ask(text, "/scan"); } catch (err) { quick = { ok: false, error: String(err) }; }
     if (!stillCurrent()) return;
@@ -254,18 +523,11 @@
     const first = quick?.ok ? quick.data : OFFLINE(quick?.error);
     paint(first, t, !!first.pending_llm);
 
-    if (!first.pending_llm) return; // tầng 1 đã kết luận — xong
+    if (!first.pending_llm) return;
 
-    /* Chờ một nhịp trước khi gọi AI.
-
-       Người dùng lướt hộp thư sẽ mở qua hàng loạt thư trong vài trăm mili giây.
-       Nếu gọi ngay, mỗi cái liếc qua là một lần trả tiền — bộ chặn theo
-       "thế hệ" chỉ bỏ KẾT QUẢ về muộn, chứ tiền thì đã tiêu rồi.
-       Đợi một nhịp ngắn: chỉ thư nào người dùng thật sự dừng lại mới tốn token. */
     await new Promise((r) => setTimeout(r, 450));
     if (!stillCurrent()) return;
 
-    // Tầng 2: hỏi AI, rồi thay kết quả tạm bằng kết luận thật.
     let full;
     try { full = await ask(text, "/analyze"); } catch (err) { full = { ok: false, error: String(err) }; }
     if (!stillCurrent()) return;

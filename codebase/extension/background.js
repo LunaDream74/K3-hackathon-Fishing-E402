@@ -98,10 +98,42 @@ async function analyze(text, path = "/analyze") {
   return { ...data, cached: false };
 }
 
+async function callBridgeChat(text, question) {
+  const res = await fetch(`${BRIDGE_URL}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, question }),
+  });
+  if (!res.ok) throw new Error(`bridge chat ${res.status}`);
+  return res.json();
+}
+
+async function callBridgeOverride(url, verdict, note) {
+  const res = await fetch(`${BRIDGE_URL}/override`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url, verdict, note }),
+  });
+  if (!res.ok) throw new Error(`bridge override ${res.status}`);
+  return res.json();
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === "PS_CACHE_STATS") {
     sendResponse({ ok: true, data: { size: cache.size, max: CACHE_MAX } });
     return false;
+  }
+  if (msg?.type === "PS_OVERRIDE") {
+    callBridgeOverride(msg.url, msg.verdict, msg.note)
+      .then((data) => sendResponse(data))
+      .catch((err) => sendResponse({ ok: false, error: String(err.message || err) }));
+    return true;
+  }
+  if (msg?.type === "PS_CHAT") {
+    callBridgeChat(msg.text, msg.question)
+      .then((data) => sendResponse(data))
+      .catch((err) => sendResponse({ ok: false, error: String(err.message || err) }));
+    return true;
   }
   if (msg?.type !== "PS_ANALYZE") return false;
 

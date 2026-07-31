@@ -9,35 +9,90 @@ from ._shared import (
     check_typosquatting,
     is_redirect_or_shortened,
     expand_redirect_url,
-    is_private_or_restricted_target
+    is_private_or_restricted_target,
+    KNOWN_SHORTENERS,
+    load_active_memory
 )
+
+def analyze_social_engineering_lures(text: str) -> Dict[str, Any]:
+    """
+    Bộ quét thủ thuật thao túng tâm lý (Social Engineering Text Heuristics) tại Tầng 1.
+    Đóng vai trò là Bộ số nhân rủi ro (Risk Multiplier) để ra quyết định theo hướng Xác Suất Đồng Quy.
+    """
+    lower_text = text.lower()
+    
+    urgency_kws = ["khẩn", "ngay lập tức", "trong vòng 24", "trong 30 phút", "hạn chót", "trước 17:00", "urgent", "immediately", "khắc phục gấp", "gấp", "deadline", "expires"]
+    threat_kws = ["bị khoá", "bị khóa", "đình chỉ", "hủy tài khoản", "tạm tháo", "rò rỉ", "vi phạm", "tạm dừng", "hủy bỏ", "khoá tài khoản", "reset your password", "thay đổi thông tin"]
+    reward_kws = ["thưởng tết", "quà tặng", "chi trả", "tăng lương", "lì xì", "trúng thưởng", "voucher", "thù lao", "miễn phí"]
+    
+    found_urgency = [w for w in urgency_kws if w in lower_text]
+    found_threat = [w for w in threat_kws if w in lower_text]
+    found_reward = [w for w in reward_kws if w in lower_text]
+    
+    all_matched = list(dict.fromkeys(found_urgency + found_threat + found_reward))
+    categories = []
+    if found_urgency:
+        categories.append("thúc ép thời gian khẩn cấp")
+    if found_threat:
+        categories.append("đe dọa hình phạt/khóa tài khoản")
+    if found_reward:
+        categories.append("lôi kéo bằng phần thưởng/tài chính")
+        
+    if all_matched:
+        cat_str = " và ".join(categories)
+        kw_str = ", ".join(f"'{k}'" for k in all_matched[:4])
+        summary = f"⚠️ Thủ thuật thao túng tâm lý (Social Engineering): Văn bản sử dụng chiến thuật {cat_str} ({kw_str}) nhằm gây xáo xộn cảm xúc và thúc ép người dùng bấm liên kết mà không kịp suy xét kỹ lưỡng."
+    else:
+        summary = ""
+        
+    return {
+        "has_lures": len(all_matched) > 0,
+        "matched_categories": categories,
+        "matched_keywords": all_matched,
+        "summary_reason": summary
+    }
 
 def scan_text_and_urls(text_input: str) -> Dict[str, Any]:
     """
-    Smart Rule Engine 2.0 & Agentic Pre-fetch Injection (v0.2.2 - Zero-Trust Armor).
-    Tuân thủ giao tiếp Cố Vấn Đồng Cảm (Empathetic UX) - Người dùng là chốt chặn cuối.
+    Smart Rule Engine 2.0 & Actionable Copilot Toolkit (v0.4.0 - Universal Auto-Drafting & Probabilistic Fusion).
+    Tuân thủ giao tiếp Cố Vấn Đồng Cảm, phân tích song hành URL + Văn Bản, cung cấp 100% bản nháp hành động lập thì.
     """
     db = load_whitelist_db()
+    mem_db = load_active_memory()
     company_domains = list(db.get("company_domains", []))
     trusted_domains = set(db.get("trusted_external_domains", []))
+    human_whitelist = set(mem_db.get("human_whitelisted_domains", []))
+    human_blacklist = set(mem_db.get("human_blacklisted_domains", []))
     high_risk_exts = tuple(db.get("high_risk_extensions", []))
     suspicious_keywords = db.get("suspicious_keywords_in_url", [])
 
     urls = extract_all_urls(text_input)
+    soc_eng = analyze_social_engineering_lures(text_input)
     
     # Trường hợp 0: Không có URL nào trong nội dung
     if not urls:
+        risk_sc = 15 if soc_eng["has_lures"] else 2
+        rec = (f"✅ Trợ lý PhishShield đã rà soát: Dù văn bản có tiếng nói gấp gáp hoặc chú ý ({', '.join(soc_eng['matched_keywords'][:3])}), nhưng nội dung hoàn toàn không chứa đường dẫn liên kết hay trang web lạ nào. Bạn có thể yên tâm đọc thông báo." 
+               if soc_eng["has_lures"] else 
+               "✅ Trợ lý PhishShield đã kiểm duyệt: Trong văn bản không chứa liên kết web nào. Về mặt phân tích đường link là hoàn toàn an toàn.")
         return {
             "extracted_urls": [],
+            "social_engineering_audit": soc_eng,
             "needs_llm_call": False,
             "deterministic_result": {
                 "risk_level": "SAFE",
-                "risk_score": 2, 
+                "risk_score": risk_sc, 
                 "confidence_score": 0.95,
                 "confidence_level": "HIGH",
                 "suspicious_elements": [],
-                "recommendation": "✅ Trợ lý PhishShield đã kiểm duyệt: Trong văn bản không chứa liên kết web nào. Về mặt phân tích đường link là hoàn toàn an toàn.",
-                "analysis_source": "SMART_RULE_ENGINE_2.0 (No LLM Called)"
+                "recommendation": rec,
+                "action_draft": {
+                    "draft_type": "REPLY_ACK",
+                    "target_recipient": "Người gửi Email / Đối tác",
+                    "message_title": "💡 Gợi ý thao tác: Phản hồi xác nhận đã đọc thông báo",
+                    "message_template": "Cảm ơn bạn/anh chị. Mình đã đọc và tiếp nhận trọn vẹn nội dung email thông báo này nhé!"
+                },
+                "analysis_source": "SMART_RULE_ENGINE_2.0 (Probabilistic Fusion & Zero Token)"
             },
             "url_analyses": []
         }
@@ -60,6 +115,16 @@ def scan_text_and_urls(text_input: str) -> Dict[str, Any]:
             "redirect_audit": None,
             "typosquatting_audit": None
         }
+        
+        # Bước A-1: Kiểm tra Trí Nhớ Động từ phản hồi con người (Active Memory Blacklist - Human RLHF)
+        if domain in human_blacklist or any(domain.endswith("." + bd) for bd in human_blacklist if bd):
+            analysis["status"] = "DANGER_BY_RULE"
+            reason = f"🧠 TRÍ NHỚ ĐỘNG (Active Memory - Human RLHF): Tên miền '{domain}' đã từng bị người dùng trong tổ chức gán nhãn Độc hại. Hệ thống từ chối truy xuất ngay lập tức!"
+            analysis["reasons"].append(reason)
+            has_definite_danger = True
+            danger_reasons.append(reason)
+            url_analyses.append(analysis)
+            continue
         
         # Bước A0: Kiểm định Zero-Trust Armor (Chặn Giao thức cấm & Tấn công nội bộ SSRF)
         cleaned_url = url if re.match(r'^[a-zA-Z]+://', url) else "http://" + url
@@ -108,6 +173,14 @@ def scan_text_and_urls(text_input: str) -> Dict[str, Any]:
                 danger_reasons.append(reason)
                 url_analyses.append(analysis)
                 continue
+            elif (domain in KNOWN_SHORTENERS or any(domain.endswith(s) for s in KNOWN_SHORTENERS)) and soc_eng["has_lures"]:
+                analysis["status"] = "DANGER_BY_RULE"
+                reason = f"🚨 CẢNH BÁO CAO ĐỘ: Liên kết rút gọn ẩn danh '{url}' đi kèm thủ thuật thúc ép/đe dọa ('{', '.join(soc_eng['matched_keywords'][:2])}'). Đây là kịch bản lừa đảo điển hình!"
+                analysis["reasons"].append(reason)
+                has_definite_danger = True
+                danger_reasons.append(reason)
+                url_analyses.append(analysis)
+                continue
             else:
                 analysis["status"] = "NEEDS_LLM"
                 analysis["reasons"].append(f"Liên kết rút gọn / chuyển hướng mang địa chỉ gốc là '{url}' được Tool cách ly giải mã trỏ sang đích đến: '{audit_res['unmasked_destination']}'.")
@@ -115,16 +188,22 @@ def scan_text_and_urls(text_input: str) -> Dict[str, Any]:
                 url_analyses.append(analysis)
                 continue
 
-        # Bước B: Kiểm tra Whitelist công ty & Trusted domains
+        # Bước B: Kiểm tra Whitelist công ty, Trusted domains & Trí Nhớ Động (Human RLHF Whitelist)
         is_trusted = False
-        for td in (set(company_domains) | trusted_domains):
+        is_human_rlhf_safe = False
+        for td in (set(company_domains) | trusted_domains | human_whitelist):
             if domain == td or domain.endswith("." + td):
                 is_trusted = True
+                if td in human_whitelist and td not in company_domains and td not in trusted_domains:
+                    is_human_rlhf_safe = True
                 break
                 
         if is_trusted:
             analysis["status"] = "SAFE_BY_RULE"
-            analysis["reasons"].append(f"Tên miền '{domain}' thuộc hệ thống hạ tầng quen thuộc và uy tín của công ty/đối tác.")
+            if is_human_rlhf_safe:
+                analysis["reasons"].append(f"🧠 TRÍ NHỚ ĐỘNG (Active Memory - Human RLHF): Tên miền '{domain}' đã được chuyên viên/người dùng xác nhận An toàn trong lịch sử phản hồi.")
+            else:
+                analysis["reasons"].append(f"Tên miền '{domain}' thuộc hệ thống hạ tầng quen thuộc và uy tín của công ty/đối tác.")
             url_analyses.append(analysis)
             continue
             
@@ -170,42 +249,74 @@ def scan_text_and_urls(text_input: str) -> Dict[str, Any]:
             
         url_analyses.append(analysis)
 
-    # Quyết định điều phối với Ngôn ngữ Đồng Cảm & Khiên Zero-Trust (Empathetic Copilot Communication)
+    # Quyết định điều phối Xác Suất Đồng Quy với Ngôn ngữ Đồng Cảm & Khử Lặp Tuyệt Đối
     if has_definite_danger:
+        # Khử lặp lý do 100% bằng dict.fromkeys
+        unique_danger_reasons = list(dict.fromkeys(danger_reasons))
+        if soc_eng["has_lures"]:
+            unique_danger_reasons.append(soc_eng["summary_reason"])
+            risk_score = 98  # Cộng hưởng cả 2 trục Văn bản & URL
+        else:
+            risk_score = 92  # Chỉ thuần túy lỗi từ tên miền độc hại
+            
+        # Lấy tối đa 2 lý do sắc bén nhất cho vào câu nháp báo cáo để tránh dài dòng
+        summary_reasons_for_draft = "; ".join(unique_danger_reasons[:2])
+            
         return {
             "extracted_urls": urls,
+            "social_engineering_audit": soc_eng,
             "needs_llm_call": False,
             "deterministic_result": {
                 "risk_level": "DANGER",
-                "risk_score": 96, 
+                "risk_score": risk_score, 
                 "confidence_score": 0.99, 
                 "confidence_level": "HIGH",
-                "suspicious_elements": danger_reasons,
-                "recommendation": "🛡️ Góc Cố Vấn từ Trợ lý AI: Hệ thống rà soát phát hiện dấu hiệu giả mạo thương hiệu hoặc vi phạm chính sách tường lửa nội bộ trên đường link trong email. Đây là thủ thuật đánh tráo kỹ thuật thường dùng trong kịch bản Tấn công mạng/Phishing. Trợ lý đề xuất bạn cân nhắc không thao tác tại liên kết này và chuyển hồ sơ này sang cho phòng IT Kỹ thuật thẩm định nhé!",
-                "analysis_source": "SMART_RULE_ENGINE_2.0 (No LLM Called - Saved Token)"
+                "suspicious_elements": unique_danger_reasons,
+                "recommendation": "🛡️ Góc Cố Vấn từ Trợ lý AI: Hệ thống phát hiện sự cộng hưởng giữa liên kết giả mạo thương hiệu/tính năng mờ ám và thủ thuật thúc ép người dùng trong email. Trợ lý đề xuất bạn không nhấp mở trang đích và bấm Copy bản nháp dưới đây để gửi báo cáo nhanh cho phòng IT Kỹ thuật xử lý nhé!",
+                "action_draft": {
+                    "draft_type": "INCIDENT_REPORT",
+                    "target_recipient": "Phòng Bảo Mật IT / SOC Helpdesk",
+                    "message_title": "🚨 Gợi ý thao tác: Copy Báo cáo khẩn vi phạm an ninh gửi Đội IT",
+                    "message_template": f"Kính gửi Phòng Bảo Mật IT, hệ thống PhishShield trên máy tôi vừa tự động phát hiện một email có tính chất rủi ro cao mang bằng chứng kỹ thuật: '{summary_reasons_for_draft}'. Nhờ anh em kỹ thuật kiểm nghiệm và chặn tên miền/IP này trên toàn mạng công ty nhé!"
+                },
+                "analysis_source": "SMART_RULE_ENGINE_2.0 (Probabilistic Fusion & Zero Token)"
             },
             "url_analyses": url_analyses
         }
         
     if all(u["status"] == "SAFE_BY_RULE" for u in url_analyses):
+        # Dù văn bản có giục giã khẩn cấp hay nhắc nhở hạn chót, vì toàn bộ Link thuộc Whitelist hợp pháp -> AN TOÀN!
+        risk_score = 10 if soc_eng["has_lures"] else 3
+        rec = (f"✅ Trợ lý PhishShield đã kiểm chứng: Toàn bộ liên kết trong thư đều trỏ về cổng thông tin hợp pháp và xác thực của công ty/đối tác. Dù thông báo có tính chất gấp gáp hoặc liên quan đến hạn chót ('{', '.join(soc_eng['matched_keywords'][:3])}'), bạn hoàn toàn có thể yên tâm tiếp tục công việc trên hệ thống an toàn nhé!" 
+               if soc_eng["has_lures"] else 
+               "✅ Trợ lý PhishShield đã kiểm tra: Toàn bộ đường link trong nội dung đều hướng về trang thông tin hợp pháp và quen thuộc. Bạn hoàn toàn an tâm tiếp tục công việc nhé!")
+        
         return {
             "extracted_urls": urls,
+            "social_engineering_audit": soc_eng,
             "needs_llm_call": False,
             "deterministic_result": {
                 "risk_level": "SAFE",
-                "risk_score": 2, 
+                "risk_score": risk_score, 
                 "confidence_score": 0.95,
                 "confidence_level": "HIGH",
                 "suspicious_elements": [],
-                "recommendation": "✅ Trợ lý PhishShield đã kiểm tra: Toàn bộ đường link trong nội dung đều hướng về trang thông tin hợp pháp và quen thuộc. Bạn hoàn toàn an tâm tiếp tục công việc nhé!",
-                "analysis_source": "SMART_RULE_ENGINE_2.0 (No LLM Called - Saved Token)"
+                "recommendation": rec,
+                "action_draft": {
+                    "draft_type": "REPLY_ACK",
+                    "target_recipient": "Người gửi Email / Đồng nghiệp",
+                    "message_title": "💡 Gợi ý thao tác: Copy tin nhắn xác nhận tiếp nhận tài liệu an toàn",
+                    "message_template": "Cảm ơn bạn/anh chị đã gửi thông tin. Mình đã tiếp nhận tài liệu và truy cập được liên kết hướng dẫn trên cổng hệ thống an toàn của công ty thành công nhé!"
+                },
+                "analysis_source": "SMART_RULE_ENGINE_2.0 (Probabilistic Fusion & Zero Token)"
             },
             "url_analyses": url_analyses
         }
 
-    # Các ca link lạ, rút gọn Bitly, chuyển hướng hoặc mờ hồ -> CHUYỂN LLM AGENT REASONING!
+    # Các ca link lạ, rút gọn Bitly, chuyển hướng hoặc mờ hồ -> CHUYỂN LLM AGENT REASONING KÈM BỘ GIẢI VĂN BẢN!
     return {
         "extracted_urls": urls,
+        "social_engineering_audit": soc_eng,
         "needs_llm_call": True,
         "deterministic_result": None,
         "url_analyses": url_analyses

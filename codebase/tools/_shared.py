@@ -54,17 +54,78 @@ def load_whitelist_db() -> Dict[str, Any]:
             "suspicious_keywords_in_url": []
         }
 
+def load_active_memory() -> Dict[str, Any]:
+    """
+    Tải cơ sở dữ liệu Trí Nhớ Động (Active Memory) lưu trữ kết quả học tập từ Human RLHF Feedback.
+    """
+    current_dir = Path(__file__).resolve().parent
+    memory_path = current_dir.parent / "company_policy" / "active_memory.json"
+    
+    try:
+        with open(memory_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {
+            "human_whitelisted_domains": [],
+            "human_blacklisted_domains": [],
+            "rlhf_feedback_history": []
+        }
+
+def update_active_memory(domain: str, verdict: str, note: str = "") -> bool:
+    """
+    Nạp tri thức từ quyết định phán xét của con người (Human RLHF) vào Trí Nhớ Động.
+    - Nếu verdict == 'SAFE': Đưa vào human_whitelisted_domains (loại khỏi blacklist nếu có).
+    - Nếu verdict == 'DANGER': Đưa vào human_blacklisted_domains (loại khỏi whitelist nếu có).
+    """
+    if not domain:
+        return False
+    current_dir = Path(__file__).resolve().parent
+    memory_path = current_dir.parent / "company_policy" / "active_memory.json"
+    data = load_active_memory()
+    
+    domain_clean = domain.lower().strip()
+    import datetime
+    timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+    if verdict.upper() == "SAFE":
+        if domain_clean in data.get("human_blacklisted_domains", []):
+            data["human_blacklisted_domains"].remove(domain_clean)
+        if domain_clean not in data.get("human_whitelisted_domains", []):
+            data.setdefault("human_whitelisted_domains", []).append(domain_clean)
+    elif verdict.upper() in ["DANGER", "PHISHING", "DOUBT"]:
+        if domain_clean in data.get("human_whitelisted_domains", []):
+            data["human_whitelisted_domains"].remove(domain_clean)
+        if domain_clean not in data.get("human_blacklisted_domains", []):
+            data.setdefault("human_blacklisted_domains", []).append(domain_clean)
+            
+    history_entry = {
+        "timestamp": timestamp,
+        "domain": domain_clean,
+        "override_verdict": verdict.upper(),
+        "source": "Human_RLHF_Feedback",
+        "note": note or f"Người dùng đổi nhãn phán xét thành {verdict.upper()} (Active Memory Evolving)."
+    }
+    data.setdefault("rlhf_feedback_history", []).append(history_entry)
+    
+    try:
+        with open(memory_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        print(f"[Error] Không thể ghi Trí Nhớ Động: {e}")
+        return False
+
 def extract_all_urls(text: str) -> List[str]:
     """
     Sử dụng biểu thức chính quy (Regex) để trích xuất toàn bộ đường link trong văn bản email.
     Bao gồm cả các giao thức phi chuần như file://, ftp:// để đưa vào trạm kiểm soát Zero-Trust.
     """
     url_pattern = re.compile(
-        r'(?:(?:https?|ftp|file|gopher|data)://)?'
+        r'(?:(?:https?|ftp|file|gopher|data)://[-a-zA-Z0-9()@:%_\+.~#?&//=]+|'
         r'(?:[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b|'
         r'(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)|'
         r'localhost)'
-        r'(?:[-a-zA-Z0-9()@:%_\+.~#?&//=]*)',
+        r'(?:[-a-zA-Z0-9()@:%_\+.~#?&//=]*))',
         re.IGNORECASE
     )
     

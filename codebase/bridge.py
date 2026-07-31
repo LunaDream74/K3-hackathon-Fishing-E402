@@ -28,6 +28,7 @@ if str(CODEBASE_DIR) not in sys.path:
     sys.path.insert(0, str(CODEBASE_DIR))
 
 from tools.url_scanner import scan_text_and_urls  # noqa: E402
+from tools._shared import update_active_memory, get_domain_from_url  # noqa: E402
 
 # Tầng LLM là tuỳ chọn: không có key thì bridge vẫn chạy, chỉ còn tầng luật tĩnh.
 try:
@@ -103,6 +104,12 @@ def _to_contract(raw: dict, tier: str) -> dict:
         "recommendation": raw.get("recommendation", ""),
         "analysis_source": raw.get("analysis_source", ""),
         "extracted_urls": raw.get("extracted_urls", []),
+        "action_draft": raw.get("action_draft", {
+            "draft_type": "REPLY_ACK" if verdict == "SAFE" else ("INCIDENT_REPORT" if verdict == "DANGER" else "VERIFICATION"),
+            "target_recipient": "Phòng Ban Hỗ Trợ / Đối Tác",
+            "message_title": "💡 Gợi ý thao tác phản hồi nhanh cho email này",
+            "message_template": "Cảm ơn bạn, mình đã tiếp nhận và sẽ kiểm tra phản hồi sớm nhé!"
+        }),
     }
 
 
@@ -137,6 +144,12 @@ def scan_only(text: str) -> dict:
         "recommendation": "Đang kiểm tra kỹ hơn. Khoan bấm liên kết nào cho tới khi có kết luận.",
         "analysis_source": "RULE_ENGINE (chờ tầng AI)",
         "extracted_urls": scan.get("extracted_urls", []),
+        "action_draft": {
+            "draft_type": "VERIFICATION",
+            "target_recipient": "Bộ phận Hỗ Trợ Kỹ Thuật",
+            "message_title": "💡 Gợi ý thao tác: Copy tin nhắn hỏi kiểm chứng liên kết chưa xác thực",
+            "message_template": "Chào các bạn, mình vừa nhận được email có mang liên kết bên ngoài chưa nằm trong danh sách kiểm nghiệm chính thức. Cho mình hỏi bên mình có đang triển khai công việc qua trang web này không ạ?"
+        },
         "pending_llm": _HAS_KEY,
     }
 
@@ -165,6 +178,12 @@ def analyze(text: str) -> dict:
                               "(thiếu OPENAI_API_KEY). Đừng bấm liên kết cho tới khi kiểm chứng được.",
             "analysis_source": "RULE_ENGINE (LLM unavailable — no API key)",
             "extracted_urls": scan.get("extracted_urls", []),
+            "action_draft": {
+                "draft_type": "VERIFICATION",
+                "target_recipient": "Phòng IT Helpdesk",
+                "message_title": "💡 Gợi ý thao tác: Copy tin nhắn hỏi xác minh với IT",
+                "message_template": "Chào đội IT, mình thấy trong thư có đường link lạ bên ngoài nhưng phần mềm chưa kết nối được máy chủ suy luận AI. Nhờ anh em kỹ thuật kiểm tra giúp tính an toàn của email này nhé!"
+            },
         }
 
     return _to_contract(_get_agent().analyze_email(text), tier="cloud")
@@ -189,13 +208,40 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, {"ok": True, "engine": ENGINE, "llm_enabled": _HAS_KEY})
 
     def do_POST(self):
-        if self.path not in ("/analyze", "/scan"):
+        if self.path not in ("/analyze", "/scan", "/chat", "/override"):
             self.send_error(404)
             return
         try:
             n = int(self.headers.get("Content-Length") or 0)
             payload = json.loads(self.rfile.read(n) or b"{}")
             text = str(payload.get("text", ""))
+            
+            if self.path == "/chat":
+                question = str(payload.get("question", "")).strip()
+                if not question:
+                    self._json(400, {"error": "thiếu câu hỏi 'question'"})
+                    return
+                if not _HAS_KEY:
+                    self._json(200, {"ok": False, "answer": "🤖 Hiện hệ thống chưa được nạp OPENAI_API_KEY nên Trợ lý không thể thực hiện suy luận hỏi đáp. Bạn hãy nhờ IT bổ sung API Key nhé!"})
+                    return
+                answer = _get_agent().chat_with_copilot(text, question)
+                self._json(200, {"ok": True, "answer": answer})
+                return
+
+            if self.path == "/override":
+                url = str(payload.get("url", "") or payload.get("domain", "")).strip()
+                verdict = str(payload.get("verdict", "")).strip().upper()
+                note = str(payload.get("note", "Người dùng phản hồi qua Human RLHF Override.")).strip()
+                domain = get_domain_from_url(url) if ("://" in url or "/" in url) else url
+                if not domain or not verdict:
+                    self._json(400, {"error": "thiếu tham số 'url'/'domain' hoặc 'verdict'"})
+                    return
+                success = update_active_memory(domain, verdict, note)
+                print(f"\n[*** HUMAN RLHF OVERRIDE API RECEIVED ***] -> Domain: {domain} | Verdict: {verdict}", flush=True)
+                print(f"[SUCCESS] Active Memory da cap nhat cho '{domain}'. Lan kiem tra tiep theo se xu ly tai Tang 1 (<1ms, 0 Token).\n", flush=True)
+                self._json(200, {"ok": success, "message": f"🧠 Active Memory đã nạp tri thức cho tên miền '{domain}' với phán kết [{verdict}]."})
+                return
+
             if not text.strip():
                 self._json(400, {"error": "thiếu trường 'text'"})
                 return
@@ -219,7 +265,7 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8777
-    print(f"[bridge] engine=v1  llm_enabled={_HAS_KEY}  http://127.0.0.1:{port}")
+    print(f"[bridge] engine={ENGINE}  llm_enabled={_HAS_KEY}  http://127.0.0.1:{port}")
     if not _HAS_KEY:
         print("[bridge] Chưa có OPENAI_API_KEY — chỉ chạy tầng luật tĩnh (tier 1).")
     HTTPServer(("127.0.0.1", port), Handler).serve_forever()

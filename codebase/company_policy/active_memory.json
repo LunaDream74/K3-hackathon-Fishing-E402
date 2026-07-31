@@ -1,0 +1,48 @@
+{
+  "human_whitelisted_domains": [
+    "partner-hr-payroll-system.com",
+    "verified-vendor-portal.vn"
+  ],
+  "human_blacklisted_domains": [
+    "phish-scam-alert-2026.club",
+    "fake-login-bank.tk",
+    "vinai-verify-account.tk"
+  ],
+  "rlhf_feedback_history": [
+    {
+      "timestamp": "2026-07-31T08:00:00Z",
+      "domain": "partner-hr-payroll-system.com",
+      "override_verdict": "SAFE",
+      "source": "Human_RLHF_Feedback",
+      "note": "Nhân viên xác nhận cổng trả lương hợp lệ của đối tác."
+    },
+    {
+      "timestamp": "2026-07-31T08:15:00Z",
+      "domain": "phish-scam-alert-2026.club",
+      "override_verdict": "DANGER",
+      "source": "Human_RLHF_Feedback",
+      "note": "Người dùng bóc phốt và báo cáo web lừa đảo chiếm đoạt mật khẩu."
+    },
+    {
+      "timestamp": "2026-07-31T02:52:43Z",
+      "domain": "vinai-verify-account.tk",
+      "override_verdict": "DANGER",
+      "source": "Human_RLHF_Feedback",
+      "note": "Human RLHF Override từ Hộp thư ([KHẨN] Tài khoản của bạn sẽ bị khoá trong 30 phút)"
+    },
+    {
+      "timestamp": "2026-07-31T02:59:18Z",
+      "domain": "vinai-verify-account.tk",
+      "override_verdict": "DANGER",
+      "source": "Human_RLHF_Feedback",
+      "note": "Human RLHF Override từ Hộp thư ([KHẨN] Tài khoản của bạn sẽ bị khoá trong 30 phút)"
+    },
+    {
+      "timestamp": "2026-07-31T04:42:54Z",
+      "domain": "vinai-verify-account.tk",
+      "override_verdict": "DANGER",
+      "source": "Human_RLHF_Feedback",
+      "note": "Human RLHF Override từ Hộp thư ([KHẨN] Tài khoản của bạn sẽ bị khoá trong 30 phút)"
+    }
+  ]
+}
