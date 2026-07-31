@@ -207,13 +207,26 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, {"ok": True, "engine": ENGINE, "llm_enabled": _HAS_KEY})
 
     def do_POST(self):
-        if self.path not in ("/analyze", "/scan"):
+        if self.path not in ("/analyze", "/scan", "/chat"):
             self.send_error(404)
             return
         try:
             n = int(self.headers.get("Content-Length") or 0)
             payload = json.loads(self.rfile.read(n) or b"{}")
             text = str(payload.get("text", ""))
+            
+            if self.path == "/chat":
+                question = str(payload.get("question", "")).strip()
+                if not question:
+                    self._json(400, {"error": "thiếu câu hỏi 'question'"})
+                    return
+                if not _HAS_KEY:
+                    self._json(200, {"ok": False, "answer": "🤖 Hiện hệ thống chưa được nạp OPENAI_API_KEY nên Trợ lý không thể thực hiện suy luận hỏi đáp. Bạn hãy nhờ IT bổ sung API Key nhé!"})
+                    return
+                answer = _get_agent().chat_with_copilot(text, question)
+                self._json(200, {"ok": True, "answer": answer})
+                return
+
             if not text.strip():
                 self._json(400, {"error": "thiếu trường 'text'"})
                 return
