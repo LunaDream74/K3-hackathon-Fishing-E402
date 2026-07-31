@@ -9,7 +9,9 @@ from ._shared import (
     check_typosquatting,
     is_redirect_or_shortened,
     expand_redirect_url,
-    is_private_or_restricted_target
+    is_private_or_restricted_target,
+    KNOWN_SHORTENERS,
+    load_active_memory
 )
 
 def analyze_social_engineering_lures(text: str) -> Dict[str, Any]:
@@ -19,8 +21,8 @@ def analyze_social_engineering_lures(text: str) -> Dict[str, Any]:
     """
     lower_text = text.lower()
     
-    urgency_kws = ["khẩn", "ngay lập tức", "trong vòng 24", "trong 30 phút", "hạn chót", "trước 17:00", "urgent", "immediately", "khắc phục gấp"]
-    threat_kws = ["bị khoá", "bị khóa", "đình chỉ", "hủy tài khoản", "tạm tháo", "rò rỉ", "vi phạm", "tạm dừng", "hủy bỏ", "khoá tài khoản"]
+    urgency_kws = ["khẩn", "ngay lập tức", "trong vòng 24", "trong 30 phút", "hạn chót", "trước 17:00", "urgent", "immediately", "khắc phục gấp", "gấp", "deadline", "expires"]
+    threat_kws = ["bị khoá", "bị khóa", "đình chỉ", "hủy tài khoản", "tạm tháo", "rò rỉ", "vi phạm", "tạm dừng", "hủy bỏ", "khoá tài khoản", "reset your password", "thay đổi thông tin"]
     reward_kws = ["thưởng tết", "quà tặng", "chi trả", "tăng lương", "lì xì", "trúng thưởng", "voucher", "thù lao", "miễn phí"]
     
     found_urgency = [w for w in urgency_kws if w in lower_text]
@@ -56,8 +58,11 @@ def scan_text_and_urls(text_input: str) -> Dict[str, Any]:
     Tuân thủ giao tiếp Cố Vấn Đồng Cảm, phân tích song hành URL + Văn Bản, cung cấp 100% bản nháp hành động lập thì.
     """
     db = load_whitelist_db()
+    mem_db = load_active_memory()
     company_domains = list(db.get("company_domains", []))
     trusted_domains = set(db.get("trusted_external_domains", []))
+    human_whitelist = set(mem_db.get("human_whitelisted_domains", []))
+    human_blacklist = set(mem_db.get("human_blacklisted_domains", []))
     high_risk_exts = tuple(db.get("high_risk_extensions", []))
     suspicious_keywords = db.get("suspicious_keywords_in_url", [])
 
@@ -111,6 +116,16 @@ def scan_text_and_urls(text_input: str) -> Dict[str, Any]:
             "typosquatting_audit": None
         }
         
+        # Bước A-1: Kiểm tra Trí Nhớ Động từ phản hồi con người (Active Memory Blacklist - Human RLHF)
+        if domain in human_blacklist or any(domain.endswith("." + bd) for bd in human_blacklist if bd):
+            analysis["status"] = "DANGER_BY_RULE"
+            reason = f"🧠 TRÍ NHỚ ĐỘNG (Active Memory - Human RLHF): Tên miền '{domain}' đã từng bị người dùng trong tổ chức gán nhãn Độc hại. Hệ thống từ chối truy xuất ngay lập tức!"
+            analysis["reasons"].append(reason)
+            has_definite_danger = True
+            danger_reasons.append(reason)
+            url_analyses.append(analysis)
+            continue
+        
         # Bước A0: Kiểm định Zero-Trust Armor (Chặn Giao thức cấm & Tấn công nội bộ SSRF)
         cleaned_url = url if re.match(r'^[a-zA-Z]+://', url) else "http://" + url
         try:
@@ -158,6 +173,14 @@ def scan_text_and_urls(text_input: str) -> Dict[str, Any]:
                 danger_reasons.append(reason)
                 url_analyses.append(analysis)
                 continue
+            elif (domain in KNOWN_SHORTENERS or any(domain.endswith(s) for s in KNOWN_SHORTENERS)) and soc_eng["has_lures"]:
+                analysis["status"] = "DANGER_BY_RULE"
+                reason = f"🚨 CẢNH BÁO CAO ĐỘ: Liên kết rút gọn ẩn danh '{url}' đi kèm thủ thuật thúc ép/đe dọa ('{', '.join(soc_eng['matched_keywords'][:2])}'). Đây là kịch bản lừa đảo điển hình!"
+                analysis["reasons"].append(reason)
+                has_definite_danger = True
+                danger_reasons.append(reason)
+                url_analyses.append(analysis)
+                continue
             else:
                 analysis["status"] = "NEEDS_LLM"
                 analysis["reasons"].append(f"Liên kết rút gọn / chuyển hướng mang địa chỉ gốc là '{url}' được Tool cách ly giải mã trỏ sang đích đến: '{audit_res['unmasked_destination']}'.")
@@ -165,16 +188,22 @@ def scan_text_and_urls(text_input: str) -> Dict[str, Any]:
                 url_analyses.append(analysis)
                 continue
 
-        # Bước B: Kiểm tra Whitelist công ty & Trusted domains
+        # Bước B: Kiểm tra Whitelist công ty, Trusted domains & Trí Nhớ Động (Human RLHF Whitelist)
         is_trusted = False
-        for td in (set(company_domains) | trusted_domains):
+        is_human_rlhf_safe = False
+        for td in (set(company_domains) | trusted_domains | human_whitelist):
             if domain == td or domain.endswith("." + td):
                 is_trusted = True
+                if td in human_whitelist and td not in company_domains and td not in trusted_domains:
+                    is_human_rlhf_safe = True
                 break
                 
         if is_trusted:
             analysis["status"] = "SAFE_BY_RULE"
-            analysis["reasons"].append(f"Tên miền '{domain}' thuộc hệ thống hạ tầng quen thuộc và uy tín của công ty/đối tác.")
+            if is_human_rlhf_safe:
+                analysis["reasons"].append(f"🧠 TRÍ NHỚ ĐỘNG (Active Memory - Human RLHF): Tên miền '{domain}' đã được chuyên viên/người dùng xác nhận An toàn trong lịch sử phản hồi.")
+            else:
+                analysis["reasons"].append(f"Tên miền '{domain}' thuộc hệ thống hạ tầng quen thuộc và uy tín của công ty/đối tác.")
             url_analyses.append(analysis)
             continue
             

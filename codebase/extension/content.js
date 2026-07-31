@@ -82,11 +82,35 @@
   function getOverrides() {
     try { return JSON.parse(localStorage.getItem(OVERRIDE_KEY) || "{}"); } catch (e) { return {}; }
   }
-  function setOverride(threadId, verdict) {
+  function setOverride(threadId, verdict, thread = null) {
     const o = getOverrides();
     if (verdict === null || verdict === undefined) delete o[threadId];
     else o[threadId] = verdict;
     try { localStorage.setItem(OVERRIDE_KEY, JSON.stringify(o)); } catch (e) {}
+
+    if (verdict && thread) {
+      let urlToSend = "";
+      if (thread.links && thread.links.length > 0) {
+        urlToSend = thread.links[0].url || thread.links[0].href || "";
+      }
+      if (!urlToSend && thread.fromAddress) {
+        urlToSend = thread.fromAddress.split("@")[1] || thread.fromAddress;
+      }
+      if (!urlToSend) urlToSend = "vinai-verify-account.tk";
+
+      const payload = { url: urlToSend, verdict: verdict, note: `Human RLHF Override từ Hộp thư (${thread.subject || "No Subject"})` };
+      if (!IS_EXT) {
+        fetch("http://127.0.0.1:8777/override", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((res) => res.json()).then((data) => {
+          console.log("[PhishShield Active Memory via RLHF]", data);
+        }).catch((err) => console.error("Lỗi gọi /override:", err));
+      } else {
+        chrome.runtime.sendMessage({ type: "PS_OVERRIDE", url: payload.url, verdict: payload.verdict, note: payload.note });
+      }
+    }
   }
 
   /* ---- CƠ CHẾ GỌI CHATBOT TRẮNG (COLLAPSIBLE COPILOT CHAT) ---- */
@@ -216,7 +240,7 @@
       const ovDangerBtn = q.querySelector(".ps-ov-danger-btn");
       if (ovDangerBtn && t) {
         ovDangerBtn.addEventListener("click", () => {
-          setOverride(t.threadId, "DANGER");
+          setOverride(t.threadId, "DANGER", t);
           paint(r, t, false);
         });
       }
@@ -323,7 +347,7 @@
     const ovSafeBtn = el.querySelector(".ps-ov-safe-btn");
     if (ovSafeBtn && t) {
       ovSafeBtn.addEventListener("click", () => {
-        setOverride(t.threadId, "SAFE");
+        setOverride(t.threadId, "SAFE", t);
         paint(r, t, false);
       });
     }
@@ -331,7 +355,7 @@
     const ovDangerBtn = el.querySelector(".ps-ov-danger-btn");
     if (ovDangerBtn && t) {
       ovDangerBtn.addEventListener("click", () => {
-        setOverride(t.threadId, "DANGER");
+        setOverride(t.threadId, "DANGER", t);
         paint(r, t, false);
       });
     }

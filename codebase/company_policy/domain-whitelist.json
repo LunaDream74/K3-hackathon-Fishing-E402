@@ -15,7 +15,14 @@
     "stackoverflow.com",
     "slack.com",
     "zoom.us",
-    "teams.microsoft.com"
+    "teams.microsoft.com",
+    "vietcombank.com.vn",
+    "techcombank.com.vn",
+    "bidv.com.vn",
+    "mbbank.com.vn",
+    "vpbank.com.vn",
+    "chinhphu.vn",
+    "vneid.gov.vn"
   ],
   "high_risk_extensions": [
     ".tk",

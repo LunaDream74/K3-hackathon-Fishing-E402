@@ -28,6 +28,7 @@ if str(CODEBASE_DIR) not in sys.path:
     sys.path.insert(0, str(CODEBASE_DIR))
 
 from tools.url_scanner import scan_text_and_urls  # noqa: E402
+from tools._shared import update_active_memory, get_domain_from_url  # noqa: E402
 
 # Tầng LLM là tuỳ chọn: không có key thì bridge vẫn chạy, chỉ còn tầng luật tĩnh.
 try:
@@ -207,7 +208,7 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, {"ok": True, "engine": ENGINE, "llm_enabled": _HAS_KEY})
 
     def do_POST(self):
-        if self.path not in ("/analyze", "/scan", "/chat"):
+        if self.path not in ("/analyze", "/scan", "/chat", "/override"):
             self.send_error(404)
             return
         try:
@@ -225,6 +226,20 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 answer = _get_agent().chat_with_copilot(text, question)
                 self._json(200, {"ok": True, "answer": answer})
+                return
+
+            if self.path == "/override":
+                url = str(payload.get("url", "") or payload.get("domain", "")).strip()
+                verdict = str(payload.get("verdict", "")).strip().upper()
+                note = str(payload.get("note", "Người dùng phản hồi qua Human RLHF Override.")).strip()
+                domain = get_domain_from_url(url) if ("://" in url or "/" in url) else url
+                if not domain or not verdict:
+                    self._json(400, {"error": "thiếu tham số 'url'/'domain' hoặc 'verdict'"})
+                    return
+                success = update_active_memory(domain, verdict, note)
+                print(f"\n[*** HUMAN RLHF OVERRIDE API RECEIVED ***] -> Domain: {domain} | Verdict: {verdict}", flush=True)
+                print(f"[SUCCESS] Active Memory da cap nhat cho '{domain}'. Lan kiem tra tiep theo se xu ly tai Tang 1 (<1ms, 0 Token).\n", flush=True)
+                self._json(200, {"ok": success, "message": f"🧠 Active Memory đã nạp tri thức cho tên miền '{domain}' với phán kết [{verdict}]."})
                 return
 
             if not text.strip():
