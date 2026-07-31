@@ -29,6 +29,20 @@
       "override_verdict": "DANGER",
       "source": "Human_RLHF_Feedback",
       "note": "Human RLHF Override từ Hộp thư ([KHẨN] Tài khoản của bạn sẽ bị khoá trong 30 phút)"
+    },
+    {
+      "timestamp": "2026-07-31T02:59:18Z",
+      "domain": "vinai-verify-account.tk",
+      "override_verdict": "DANGER",
+      "source": "Human_RLHF_Feedback",
+      "note": "Human RLHF Override từ Hộp thư ([KHẨN] Tài khoản của bạn sẽ bị khoá trong 30 phút)"
+    },
+    {
+      "timestamp": "2026-07-31T04:42:54Z",
+      "domain": "vinai-verify-account.tk",
+      "override_verdict": "DANGER",
+      "source": "Human_RLHF_Feedback",
+      "note": "Human RLHF Override từ Hộp thư ([KHẨN] Tài khoản của bạn sẽ bị khoá trong 30 phút)"
     }
   ]
 }
